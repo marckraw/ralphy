@@ -1,12 +1,47 @@
 {
   "name": "ralphy",
   "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "description": "CLI tool implementing the Ralph Wiggum technique for AI-assisted development with Linear integration",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "ralphy": "./dist/index.js"
   },
-  "keywords": [],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": [
+    "cli",
+    "linear",
+    "ai",
+    "development",
+    "automation"
+  ],
   "author": "",
   "license": "ISC",
-  "description": ""
+  "dependencies": {
+    "@linear/sdk": "^70.0.0",
+    "chalk": "^5.4.1",
+    "commander": "^14.0.0",
+    "dotenv": "^16.4.0",
+    "inquirer": "^12.3.2",
+    "ora": "^8.1.1",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.7",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }
