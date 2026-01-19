@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  webhook-service:
+    build:
+      context: ../..
+      dockerfile: apps/webhook-service/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=development
+      - JIRA_HOST=${JIRA_HOST}
+      - JIRA_EMAIL=${JIRA_EMAIL}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN}
+      - RALPHY_JIRA_USER_ID=${RALPHY_JIRA_USER_ID}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REPOS_CONFIG=${REPOS_CONFIG}
+    depends_on:
+      - redis
+    volumes:
+      - repos:/app/repos
+      - claude-credentials:/root/.claude:ro
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+
+volumes:
+  repos:
+  redis-data:
+  claude-credentials:
