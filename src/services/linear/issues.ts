@@ -137,3 +137,32 @@ export async function fetchIssueById(issueId: string): Promise<Result<LinearIssu
     };
   }
 }
+
+/**
+ * Updates an issue's description in Linear.
+ *
+ * @param issueId - The issue ID or identifier (e.g., "PROJ-42")
+ * @param description - The new description content
+ * @returns Result indicating success or failure
+ */
+export async function updateIssueDescription(
+  issueId: string,
+  description: string
+): Promise<Result<void>> {
+  try {
+    const client = getClient();
+
+    // First fetch the issue to get its internal ID
+    const issue = await client.issue(issueId);
+
+    // Update the issue description
+    await issue.update({ description });
+
+    return { success: true, data: undefined };
+  } catch (err) {
+    return {
+      success: false,
+      error: `Failed to update issue: ${err instanceof Error ? err.message : 'Unknown error'}`,
+    };
+  }
+}

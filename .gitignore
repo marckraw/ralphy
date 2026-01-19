@@ -29,6 +29,9 @@ coverage/
 # Ralphy local config (contains API keys)
 .ralphy/
 
+# Claude Code local data
+.claude/
+
 # Temporary files
 *.tmp
 *.temp
