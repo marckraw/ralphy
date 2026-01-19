@@ -127,7 +127,7 @@ describe('Config Types', () => {
   describe('DEFAULT_CLAUDE_CONFIG', () => {
     it('should have correct default values', () => {
       expect(DEFAULT_CLAUDE_CONFIG.maxIterations).toBe(20);
-      expect(DEFAULT_CLAUDE_CONFIG.timeout).toBe(300000);
+      expect(DEFAULT_CLAUDE_CONFIG.timeout).toBe(1200000); // 20 minutes
     });
   });
 });

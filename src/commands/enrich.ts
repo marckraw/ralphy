@@ -65,19 +65,20 @@ async function enrichSingleIssue(
   dryRun: boolean,
   verbose: boolean,
   enrichedLabelName: string,
-  model: string
+  model: string,
+  timeout: number
 ): Promise<boolean> {
   logger.info(`\nEnriching ${logger.highlight(issue.identifier)}: ${issue.title}`);
 
   // Build the prompt
   const prompt = buildEnrichmentPrompt(issue);
 
-  if (verbose) {
-    logger.debug('Prompt length: ' + prompt.length + ' characters');
-  }
+  logger.debug('Prompt length: ' + prompt.length + ' characters');
 
   // Execute Claude
   const args = buildEnrichmentClaudeArgs(prompt, model);
+  logger.debug('Claude command: claude ' + args.join(' ').slice(0, 200) + '...');
+  logger.debug('Model: ' + (model || 'default'));
 
   const startTime = Date.now();
   let output = '';
@@ -86,10 +87,24 @@ async function enrichSingleIssue(
   const spinner = createSpinner('Running Claude enrichment...').start();
 
   try {
-    const subprocess = execa('claude', args, {
-      timeout: 180000, // 3 minutes for enrichment
+    const timeoutMinutes = Math.round(timeout / 60000);
+    logger.debug(`Timeout: ${timeout}ms (${timeoutMinutes} minutes)`);
+
+    // Pass prompt via stdin instead of command line argument to handle long prompts
+    const argsWithoutPrompt = args.filter((arg, i) => {
+      // Remove -p and the following prompt argument
+      if (arg === '-p') return false;
+      if (i > 0 && args[i - 1] === '-p') return false;
+      return true;
+    });
+
+    logger.debug(`Args without prompt: ${argsWithoutPrompt.join(' ')}`);
+    logger.debug(`Passing prompt via stdin (${prompt.length} chars)`);
+
+    const subprocess = execa('claude', [...argsWithoutPrompt, '-p', '-'], {
+      timeout,
       reject: false,
-      stdin: 'ignore',
+      input: prompt,  // Pass prompt via stdin
     });
 
     // If verbose, stream the output
@@ -164,8 +179,18 @@ async function enrichSingleIssue(
     if (result.exitCode !== 0) {
       if (!verbose) spinner.fail(`Claude enrichment failed (${elapsed}s)`);
       logger.error(`Exit code: ${result.exitCode}`);
+      if ('timedOut' in result && result.timedOut) {
+        logger.error(`Process timed out after ${timeout / 1000} seconds`);
+      }
+      if ('signal' in result && result.signal) {
+        logger.error(`Process was killed with signal: ${result.signal}`);
+      }
       if (result.stderr && typeof result.stderr === 'string') {
         logger.error(`stderr: ${result.stderr}`);
+      }
+      logger.debug(`Output collected: ${output.length} chars`);
+      if (output.length > 0) {
+        logger.debug(`Output preview: ${output.slice(0, 300)}...`);
       }
       return false;
     }
@@ -348,7 +373,7 @@ export async function enrichCommand(
     let failCount = 0;
 
     for (const issue of issuesToProcess) {
-      const success = await enrichSingleIssue(issue, ticketService, dryRun, verbose, enrichedLabelName, config.claude.model);
+      const success = await enrichSingleIssue(issue, ticketService, dryRun, verbose, enrichedLabelName, config.claude.model, config.claude.timeout);
       if (success) {
         successCount++;
       } else {
@@ -404,7 +429,7 @@ export async function enrichCommand(
       );
     }
 
-    const success = await enrichSingleIssue(issue, ticketService, dryRun, verbose, enrichedLabelName, config.claude.model);
+    const success = await enrichSingleIssue(issue, ticketService, dryRun, verbose, enrichedLabelName, config.claude.model, config.claude.timeout);
 
     if (!success) {
       process.exit(1);

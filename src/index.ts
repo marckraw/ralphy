@@ -16,7 +16,7 @@ dotenvConfig();
 const program = new Command();
 
 // Build identifier for debugging npm link issues
-const BUILD_ID = '20250119-v3-jira-enhanced-search';
+const BUILD_ID = '20250119-v9-stdin-prompt';
 
 program
   .name('ralphy')

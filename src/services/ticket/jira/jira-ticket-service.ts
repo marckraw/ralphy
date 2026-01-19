@@ -1,4 +1,5 @@
 import { Version3Client } from 'jira.js';
+import { markdownToAdf } from 'marklassian';
 import type {
   LabelsConfig,
   JiraProviderConfig,
@@ -178,9 +179,14 @@ export class JiraTicketService implements TicketService {
     issueId: string,
     description: string
   ): Promise<Result<void>> {
+    logger.debug(`[JiraTicketService] updateIssueDescription called for ${issueId}`);
+    logger.debug(`[JiraTicketService] Description length: ${description.length} chars`);
+
     try {
-      // Convert markdown to Atlassian Document Format (ADF)
-      const adfDescription = this.markdownToAdf(description);
+      // Convert markdown to Atlassian Document Format (ADF) using marklassian library
+      const adfDescription = markdownToAdf(description);
+      logger.debug(`[JiraTicketService] ADF conversion complete (using marklassian)`);
+      logger.debug(`[JiraTicketService] ADF preview: ${JSON.stringify(adfDescription).slice(0, 500)}...`);
 
       await this.client.issues.editIssue({
         issueIdOrKey: issueId,
@@ -189,11 +195,19 @@ export class JiraTicketService implements TicketService {
         },
       });
 
+      logger.debug(`[JiraTicketService] Issue updated successfully`);
       return { success: true, data: undefined };
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      logger.debug(`[JiraTicketService] Update error: ${errorMessage}`);
+      if (err instanceof Error && 'response' in err) {
+        const response = (err as { response?: { status?: number; data?: unknown } }).response;
+        logger.debug(`[JiraTicketService] Response status: ${response?.status}`);
+        logger.debug(`[JiraTicketService] Response data: ${JSON.stringify(response?.data)}`);
+      }
       return {
         success: false,
-        error: `Failed to update issue: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        error: `Failed to update issue: ${errorMessage}`,
       };
     }
   }
@@ -449,124 +463,4 @@ export class JiraTicketService implements TicketService {
     }
   }
 
-  private markdownToAdf(markdown: string): object {
-    // Convert markdown to basic ADF
-    // This is a simplified conversion - a full implementation would use a proper parser
-    const lines = markdown.split('\n');
-    const content: object[] = [];
-
-    let i = 0;
-    while (i < lines.length) {
-      const line = lines[i] ?? '';
-
-      // Handle headers
-      const headerMatch = line.match(/^(#{1,6})\s+(.+)$/);
-      if (headerMatch) {
-        const level = headerMatch[1]?.length ?? 1;
-        content.push({
-          type: 'heading',
-          attrs: { level },
-          content: [{ type: 'text', text: headerMatch[2] ?? '' }],
-        });
-        i++;
-        continue;
-      }
-
-      // Handle bullet lists
-      if (line.match(/^[-*]\s+/)) {
-        const listItems: object[] = [];
-        while (i < lines.length) {
-          const currentLine = lines[i] ?? '';
-          if (!currentLine.match(/^[-*]\s+/)) break;
-
-          const itemText = currentLine.replace(/^[-*]\s+/, '');
-          // Handle checkbox items
-          const checkboxMatch = itemText.match(/^\[([x ])\]\s*(.*)$/i);
-          if (checkboxMatch) {
-            const isChecked = (checkboxMatch[1] ?? '').toLowerCase() === 'x';
-            listItems.push({
-              type: 'listItem',
-              content: [
-                {
-                  type: 'taskList',
-                  attrs: { localId: '' },
-                  content: [
-                    {
-                      type: 'taskItem',
-                      attrs: {
-                        localId: '',
-                        state: isChecked ? 'DONE' : 'TODO',
-                      },
-                      content: [{ type: 'text', text: checkboxMatch[2] ?? '' }],
-                    },
-                  ],
-                },
-              ],
-            });
-          } else {
-            listItems.push({
-              type: 'listItem',
-              content: [
-                {
-                  type: 'paragraph',
-                  content: [{ type: 'text', text: itemText }],
-                },
-              ],
-            });
-          }
-          i++;
-        }
-        content.push({
-          type: 'bulletList',
-          content: listItems,
-        });
-        continue;
-      }
-
-      // Handle numbered lists
-      if (line.match(/^\d+\.\s+/)) {
-        const listItems: object[] = [];
-        while (i < lines.length) {
-          const currentLine = lines[i] ?? '';
-          if (!currentLine.match(/^\d+\.\s+/)) break;
-
-          const itemText = currentLine.replace(/^\d+\.\s+/, '');
-          listItems.push({
-            type: 'listItem',
-            content: [
-              {
-                type: 'paragraph',
-                content: [{ type: 'text', text: itemText }],
-              },
-            ],
-          });
-          i++;
-        }
-        content.push({
-          type: 'orderedList',
-          content: listItems,
-        });
-        continue;
-      }
-
-      // Handle empty lines
-      if (line.trim() === '') {
-        i++;
-        continue;
-      }
-
-      // Handle regular paragraphs
-      content.push({
-        type: 'paragraph',
-        content: [{ type: 'text', text: line }],
-      });
-      i++;
-    }
-
-    return {
-      type: 'doc',
-      version: 1,
-      content,
-    };
-  }
 }

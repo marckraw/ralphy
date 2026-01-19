@@ -99,9 +99,10 @@ export const DEFAULT_LABELS: LabelsConfig = {
   enriched: 'ralph-enriched',
 };
 
+// 20 minutes default timeout - enrichment can take a while for complex issues
 export const DEFAULT_CLAUDE_CONFIG: ClaudeConfig = {
   maxIterations: 20,
-  timeout: 300000,
+  timeout: 1200000, // 20 minutes
   model: 'sonnet',
 };
 
