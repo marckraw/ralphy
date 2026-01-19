@@ -4,7 +4,14 @@
 
 import { execa } from 'execa';
 import { initializeClient } from '../services/linear/client.js';
-import { fetchIssueById, fetchCandidateIssues, updateIssueDescription } from '../services/linear/issues.js';
+import {
+  fetchIssueById,
+  fetchCandidateIssues,
+  updateIssueDescription,
+  addLabelToIssue,
+  hasLabelByName,
+  filterUnenrichedIssues,
+} from '../services/linear/issues.js';
 import { loadConfig } from '../services/config/manager.js';
 import { isClaudeAvailable } from '../services/claude/executor.js';
 import {
@@ -25,6 +32,7 @@ export interface EnrichOptions {
   allCandidates?: boolean | undefined;
   dryRun?: boolean | undefined;
   verbose?: boolean | undefined;
+  force?: boolean | undefined;
 }
 
 /**
@@ -33,9 +41,17 @@ export interface EnrichOptions {
  * @param issue - The issue to enrich
  * @param dryRun - If true, don't update Linear, just show the result
  * @param verbose - If true, stream Claude's output
+ * @param enrichedLabelName - The name of the label to add after enrichment
+ * @param model - The Claude model to use
  * @returns True if enrichment was successful
  */
-async function enrichSingleIssue(issue: LinearIssue, dryRun: boolean, verbose: boolean): Promise<boolean> {
+async function enrichSingleIssue(
+  issue: LinearIssue,
+  dryRun: boolean,
+  verbose: boolean,
+  enrichedLabelName: string,
+  model: string
+): Promise<boolean> {
   logger.info(`\nEnriching ${logger.highlight(issue.identifier)}: ${issue.title}`);
 
   // Build the prompt
@@ -46,7 +62,7 @@ async function enrichSingleIssue(issue: LinearIssue, dryRun: boolean, verbose: b
   }
 
   // Execute Claude
-  const args = buildEnrichmentClaudeArgs(prompt);
+  const args = buildEnrichmentClaudeArgs(prompt, model);
 
   const startTime = Date.now();
   let output = '';
@@ -186,6 +202,20 @@ async function enrichSingleIssue(issue: LinearIssue, dryRun: boolean, verbose: b
     }
 
     updateSpinner.succeed(`Updated ${issue.identifier} in Linear`);
+
+    // Add enriched label
+    const labelSpinner = createSpinner(`Adding "${enrichedLabelName}" label...`).start();
+    const labelResult = await addLabelToIssue(issue.identifier, enrichedLabelName);
+
+    if (!labelResult.success) {
+      labelSpinner.fail('Failed to add enriched label');
+      logger.error(labelResult.error);
+      // Don't fail the whole operation, the description was already updated
+      logger.warn('Issue was enriched but label could not be added.');
+      return true;
+    }
+
+    labelSpinner.succeed(`Added "${enrichedLabelName}" label to ${issue.identifier}`);
     return true;
   } catch (err) {
     spinner.fail('Enrichment error');
@@ -204,7 +234,7 @@ export async function enrichCommand(
   issueIdentifier: string | undefined,
   options: EnrichOptions = {}
 ): Promise<void> {
-  const { allCandidates = false, dryRun = false, verbose = false } = options;
+  const { allCandidates = false, dryRun = false, verbose = false, force = false } = options;
 
   // Validate arguments
   if (!issueIdentifier && !allCandidates) {
@@ -254,11 +284,41 @@ export async function enrichCommand(
       process.exit(1);
     }
 
-    const issues = issuesResult.data;
-    spinner.succeed(`Found ${issues.length} candidate issue(s)`);
+    const allCandidateIssues = issuesResult.data;
+    spinner.succeed(`Found ${allCandidateIssues.length} candidate issue(s)`);
 
-    if (issues.length === 0) {
+    if (allCandidateIssues.length === 0) {
       logger.info(`\nNo issues found with the "${logger.highlight(config.linear.labels.candidate)}" label.`);
+      return;
+    }
+
+    // Filter out already-enriched issues unless --force is used
+    const enrichedLabelName = config.linear.labels.enriched;
+    let issuesToProcess = allCandidateIssues;
+    let skippedCount = 0;
+
+    if (!force) {
+      issuesToProcess = filterUnenrichedIssues(allCandidateIssues, enrichedLabelName);
+      skippedCount = allCandidateIssues.length - issuesToProcess.length;
+
+      if (skippedCount > 0) {
+        logger.info(
+          `\nSkipping ${skippedCount} already-enriched issue(s) (use --force to re-enrich)`
+        );
+
+        // Log individual skipped issues
+        for (const issue of allCandidateIssues) {
+          if (hasLabelByName(issue.labels, enrichedLabelName)) {
+            logger.info(
+              logger.dim(`  Skipping ${issue.identifier}: already enriched`)
+            );
+          }
+        }
+      }
+    }
+
+    if (issuesToProcess.length === 0) {
+      logger.info(`\nNo unenriched issues to process.`);
       return;
     }
 
@@ -266,8 +326,8 @@ export async function enrichCommand(
     let successCount = 0;
     let failCount = 0;
 
-    for (const issue of issues) {
-      const success = await enrichSingleIssue(issue, dryRun, verbose);
+    for (const issue of issuesToProcess) {
+      const success = await enrichSingleIssue(issue, dryRun, verbose, enrichedLabelName, config.claude.model);
       if (success) {
         successCount++;
       } else {
@@ -280,7 +340,11 @@ export async function enrichCommand(
     logger.info('='.repeat(60));
     logger.info('Enrichment Summary');
     logger.info('='.repeat(60));
-    logger.info(`Total issues: ${issues.length}`);
+    logger.info(`Total candidate issues: ${allCandidateIssues.length}`);
+    if (skippedCount > 0) {
+      logger.info(logger.dim(`Skipped (already enriched): ${skippedCount}`));
+    }
+    logger.info(`Processed: ${issuesToProcess.length}`);
     logger.success(`Successful: ${successCount}`);
     if (failCount > 0) {
       logger.error(`Failed: ${failCount}`);
@@ -303,7 +367,23 @@ export async function enrichCommand(
     const issue = issueResult.data;
     spinner.succeed(`Found issue: ${issue.identifier} - ${issue.title}`);
 
-    const success = await enrichSingleIssue(issue, dryRun, verbose);
+    const enrichedLabelName = config.linear.labels.enriched;
+
+    // Check if already enriched and warn (but still proceed unless --force is required)
+    if (hasLabelByName(issue.labels, enrichedLabelName)) {
+      if (!force) {
+        logger.warn(
+          `Issue ${issue.identifier} is already enriched (has "${enrichedLabelName}" label).`
+        );
+        logger.info('Use --force to re-enrich this issue.');
+        return;
+      }
+      logger.info(
+        logger.dim(`Issue already enriched - re-enriching due to --force flag`)
+      );
+    }
+
+    const success = await enrichSingleIssue(issue, dryRun, verbose, enrichedLabelName, config.claude.model);
 
     if (!success) {
       process.exit(1);

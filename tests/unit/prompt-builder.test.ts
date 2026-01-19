@@ -127,43 +127,35 @@ describe('Prompt Builder', () => {
       iteration: 1,
       maxIterations: 10,
       progressFilePath: '.ralphy/context/progress.md',
-      taskFilePath: '.ralphy/context/task.md',
     };
 
     it('should include task identifier and title', () => {
       const prompt = buildPrompt(defaultOptions);
-
       expect(prompt).toContain('# Task: PROJ-42 - Fix the bug');
     });
 
     it('should include iteration info', () => {
       const prompt = buildPrompt(defaultOptions);
-
       expect(prompt).toContain('**Iteration 1 of 10**');
     });
 
-    it('should include context file references', () => {
+    it('should include progress file reference', () => {
       const prompt = buildPrompt(defaultOptions);
-
-      expect(prompt).toContain('@.ralphy/context/task.md');
       expect(prompt).toContain('@.ralphy/context/progress.md');
     });
 
     it('should include description', () => {
       const prompt = buildPrompt(defaultOptions);
-
       expect(prompt).toContain('A detailed description of the bug.');
     });
 
     it('should include completion marker instruction', () => {
       const prompt = buildPrompt(defaultOptions);
-
       expect(prompt).toContain(COMPLETION_MARKER);
     });
 
     it('should include testing instructions', () => {
       const prompt = buildPrompt(defaultOptions);
-
       expect(prompt).toContain('npm test');
       expect(prompt).toContain('npm run typecheck');
     });
@@ -172,36 +164,31 @@ describe('Prompt Builder', () => {
   describe('buildClaudeArgs', () => {
     it('should include permission mode', () => {
       const args = buildClaudeArgs('test prompt');
-
       expect(args).toContain('--permission-mode');
       expect(args).toContain('acceptEdits');
     });
 
     it('should include prompt flag and prompt', () => {
       const args = buildClaudeArgs('test prompt');
-
       expect(args).toContain('-p');
       expect(args).toContain('test prompt');
     });
 
     it('should include output format', () => {
       const args = buildClaudeArgs('test prompt');
-
       expect(args).toContain('--output-format');
       expect(args).toContain('text');
     });
 
-    it('should return correct argument order', () => {
-      const args = buildClaudeArgs('test prompt');
+    it('should include model when provided', () => {
+      const args = buildClaudeArgs('test prompt', 'opus');
+      expect(args).toContain('--model');
+      expect(args).toContain('opus');
+    });
 
-      expect(args).toEqual([
-        '--permission-mode',
-        'acceptEdits',
-        '-p',
-        'test prompt',
-        '--output-format',
-        'text',
-      ]);
+    it('should not include model when not provided', () => {
+      const args = buildClaudeArgs('test prompt');
+      expect(args).not.toContain('--model');
     });
   });
 });

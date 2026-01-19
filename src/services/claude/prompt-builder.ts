@@ -13,7 +13,6 @@ export interface PromptOptions {
   iteration: number;
   maxIterations: number;
   progressFilePath: string;
-  taskFilePath: string;
 }
 
 /**
@@ -94,16 +93,15 @@ export function buildInitialProgressContent(issue: LinearIssue): string {
  * @returns The complete prompt string
  */
 export function buildPrompt(options: PromptOptions): string {
-  const { issue, iteration, maxIterations, progressFilePath, taskFilePath } = options;
+  const { issue, iteration, maxIterations, progressFilePath } = options;
 
   const lines: string[] = [
     `# Task: ${issue.identifier} - ${issue.title}`,
     '',
     `**Iteration ${iteration} of ${maxIterations}**`,
     '',
-    '## Context Files',
-    `- Task details: @${taskFilePath}`,
-    `- Progress notes: @${progressFilePath}`,
+    '## Progress Notes',
+    `Read and update: @${progressFilePath}`,
     '',
     '## Description',
     issue.description ?? 'No description provided.',
@@ -133,10 +131,11 @@ export function buildPrompt(options: PromptOptions): string {
  * Pure function - no side effects.
  *
  * @param prompt - The prompt to execute
+ * @param model - The model to use (e.g., 'sonnet', 'opus', 'haiku')
  * @returns Array of CLI arguments
  */
-export function buildClaudeArgs(prompt: string): string[] {
-  return [
+export function buildClaudeArgs(prompt: string, model?: string): string[] {
+  const args = [
     '--permission-mode',
     'acceptEdits',
     '-p',
@@ -144,4 +143,10 @@ export function buildClaudeArgs(prompt: string): string[] {
     '--output-format',
     'text',
   ];
+
+  if (model) {
+    args.push('--model', model);
+  }
+
+  return args;
 }

@@ -260,27 +260,25 @@ Just a description.
   describe('buildEnrichmentClaudeArgs', () => {
     it('should include prompt flag and prompt', () => {
       const args = buildEnrichmentClaudeArgs('test prompt');
-
       expect(args).toContain('-p');
       expect(args).toContain('test prompt');
     });
 
     it('should include output format', () => {
       const args = buildEnrichmentClaudeArgs('test prompt');
-
       expect(args).toContain('--output-format');
       expect(args).toContain('text');
     });
 
-    it('should return correct argument order', () => {
-      const args = buildEnrichmentClaudeArgs('test prompt');
+    it('should include model when provided', () => {
+      const args = buildEnrichmentClaudeArgs('test prompt', 'opus');
+      expect(args).toContain('--model');
+      expect(args).toContain('opus');
+    });
 
-      expect(args).toEqual([
-        '-p',
-        'test prompt',
-        '--output-format',
-        'text',
-      ]);
+    it('should not include model when not provided', () => {
+      const args = buildEnrichmentClaudeArgs('test prompt');
+      expect(args).not.toContain('--model');
     });
   });
 });

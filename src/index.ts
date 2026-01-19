@@ -7,6 +7,7 @@ import { candidatesCommand } from './commands/candidates.js';
 import { readyCommand } from './commands/ready.js';
 import { runCommand } from './commands/run.js';
 import { enrichCommand } from './commands/enrich.js';
+import { promoteCommand } from './commands/promote.js';
 
 // Load environment variables
 dotenvConfig();
@@ -82,12 +83,29 @@ program
   .option('--all-candidates', 'Enrich all issues with the ralph-candidate label')
   .option('--dry-run', 'Preview enrichment without updating Linear')
   .option('-v, --verbose', 'Show Claude output in real-time')
-  .action(async (issue: string | undefined, options: { allCandidates?: boolean; dryRun?: boolean; verbose?: boolean }) => {
+  .option('-f, --force', 'Re-enrich issues that already have the ralph-enriched label')
+  .action(async (issue: string | undefined, options: { allCandidates?: boolean; dryRun?: boolean; verbose?: boolean; force?: boolean }) => {
     try {
       await enrichCommand(issue, {
         allCandidates: options.allCandidates,
         dryRun: options.dryRun,
         verbose: options.verbose,
+        force: options.force,
+      });
+    } catch (err) {
+      console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
+      process.exit(1);
+    }
+  });
+
+program
+  .command('promote <issue>')
+  .description('Promote an issue from ralph-candidate to ralph-ready')
+  .option('--dry-run', 'Preview label changes without updating Linear')
+  .action(async (issue: string, options: { dryRun?: boolean }) => {
+    try {
+      await promoteCommand(issue, {
+        dryRun: options.dryRun,
       });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');

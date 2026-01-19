@@ -20,6 +20,7 @@ export interface ExecutionResult {
  */
 export interface ExecuteOptions {
   prompt: string;
+  model?: string;
   cwd?: string;
   timeout?: number;
   onStdout?: (data: string) => void;
@@ -41,13 +42,14 @@ export const DEFAULT_TIMEOUT_MS = 300000;
 export async function executeClaude(options: ExecuteOptions): Promise<Result<ExecutionResult>> {
   const {
     prompt,
+    model,
     cwd = process.cwd(),
     timeout = DEFAULT_TIMEOUT_MS,
     onStdout,
     onStderr,
   } = options;
 
-  const args = buildClaudeArgs(prompt);
+  const args = buildClaudeArgs(prompt, model);
   const startTime = Date.now();
   let output = '';
 

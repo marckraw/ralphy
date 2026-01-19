@@ -286,13 +286,20 @@ export function isEnrichmentComplete(output: string): boolean {
  * Pure function - no side effects.
  *
  * @param prompt - The enrichment prompt
+ * @param model - The model to use (e.g., 'sonnet', 'opus', 'haiku')
  * @returns Array of CLI arguments
  */
-export function buildEnrichmentClaudeArgs(prompt: string): string[] {
-  return [
+export function buildEnrichmentClaudeArgs(prompt: string, model?: string): string[] {
+  const args = [
     '-p',
     prompt,
     '--output-format',
     'text',
   ];
+
+  if (model) {
+    args.push('--model', model);
+  }
+
+  return args;
 }

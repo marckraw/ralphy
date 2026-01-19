@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const LabelsConfigSchema = z.object({
   ready: z.string().default('ralph-ready'),
   candidate: z.string().default('ralph-candidate'),
+  enriched: z.string().default('ralph-enriched'),
 });
 
 export const LinearConfigSchema = z.object({
@@ -16,6 +17,7 @@ export const LinearConfigSchema = z.object({
 export const ClaudeConfigSchema = z.object({
   maxIterations: z.number().int().positive().default(20),
   timeout: z.number().int().positive().default(300000),
+  model: z.string().default('sonnet'),
 });
 
 export const RalphyConfigSchema = z.object({
@@ -32,11 +34,13 @@ export type RalphyConfig = z.infer<typeof RalphyConfigSchema>;
 export const DEFAULT_LABELS: LabelsConfig = {
   ready: 'ralph-ready',
   candidate: 'ralph-candidate',
+  enriched: 'ralph-enriched',
 };
 
 export const DEFAULT_CLAUDE_CONFIG: ClaudeConfig = {
   maxIterations: 20,
   timeout: 300000,
+  model: 'sonnet',
 };
 
 export interface ParseResult<T> {

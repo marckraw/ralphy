@@ -10,7 +10,7 @@ import { loadConfig } from '../services/config/manager.js';
 import { getContextDir, getHistoryDir, ensureDir } from '../services/config/paths.js';
 import { executeClaude, isClaudeAvailable } from '../services/claude/executor.js';
 import { analyzeOutput } from '../services/claude/completion.js';
-import { buildPrompt, buildTaskFileContent, buildInitialProgressContent } from '../services/claude/prompt-builder.js';
+import { buildPrompt, buildInitialProgressContent } from '../services/claude/prompt-builder.js';
 import { handleRateLimit } from '../services/claude/rate-limiter.js';
 import { logger } from '../utils/logger.js';
 import { createSpinner } from '../utils/spinner.js';
@@ -55,21 +55,18 @@ interface HistoryEntry {
 }
 
 /**
- * Writes context files for the run.
+ * Writes progress file for the run.
  */
-async function writeContextFiles(
+async function writeProgressFile(
   issue: LinearIssue,
   contextDir: string
-): Promise<{ taskFilePath: string; progressFilePath: string }> {
+): Promise<string> {
   await ensureDir(contextDir);
 
-  const taskFilePath = path.join(contextDir, 'task.md');
   const progressFilePath = path.join(contextDir, 'progress.md');
-
-  await fs.writeFile(taskFilePath, buildTaskFileContent(issue), 'utf-8');
   await fs.writeFile(progressFilePath, buildInitialProgressContent(issue), 'utf-8');
 
-  return { taskFilePath, progressFilePath };
+  return progressFilePath;
 }
 
 /**
@@ -171,9 +168,8 @@ export async function runCommand(
   // Prepare context files
   const contextDir = getContextDir();
   const historyDir = getHistoryDir();
-  const { taskFilePath, progressFilePath } = await writeContextFiles(issue, contextDir);
+  const progressFilePath = await writeProgressFile(issue, contextDir);
 
-  logger.info(`Task file: ${logger.formatPath(taskFilePath)}`);
   logger.info(`Progress file: ${logger.formatPath(progressFilePath)}`);
   logger.info(`Max iterations: ${logger.formatNumber(maxIterations)}`);
   console.log('');
@@ -199,16 +195,46 @@ export async function runCommand(
       iteration,
       maxIterations,
       progressFilePath: path.relative(process.cwd(), progressFilePath),
-      taskFilePath: path.relative(process.cwd(), taskFilePath),
     });
 
-    // Execute Claude
+    // Execute Claude with elapsed time indicator
+    const iterationStartTime = Date.now();
+    let hasOutput = false;
+
+    // Show elapsed time while waiting for Claude
+    const elapsedInterval = setInterval(() => {
+      if (!hasOutput) {
+        const elapsed = Math.round((Date.now() - iterationStartTime) / 1000);
+        process.stdout.write(`\r${logger.dim(`⏳ Claude working... ${elapsed}s`)}`);
+      }
+    }, 1000);
+
     const executeResult = await executeClaude({
       prompt,
+      model: config.claude.model,
       timeout: config.claude.timeout,
-      onStdout: (data) => process.stdout.write(data),
-      onStderr: (data) => process.stderr.write(data),
+      onStdout: (data) => {
+        if (!hasOutput) {
+          // Clear the elapsed time line on first output
+          process.stdout.write('\r' + ' '.repeat(40) + '\r');
+          hasOutput = true;
+        }
+        process.stdout.write(data);
+      },
+      onStderr: (data) => {
+        if (!hasOutput) {
+          process.stdout.write('\r' + ' '.repeat(40) + '\r');
+          hasOutput = true;
+        }
+        process.stderr.write(data);
+      },
     });
+
+    clearInterval(elapsedInterval);
+    if (!hasOutput) {
+      // Clear elapsed line if no output was produced
+      process.stdout.write('\r' + ' '.repeat(40) + '\r');
+    }
 
     if (!executeResult.success) {
       logger.error(executeResult.error);
