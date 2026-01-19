@@ -6,14 +6,14 @@ import {
   buildClaudeArgs,
 } from '../../src/services/claude/prompt-builder.js';
 import { COMPLETION_MARKER } from '../../src/services/claude/completion.js';
-import type { LinearIssue } from '../../src/types/linear.js';
+import type { NormalizedIssue } from '../../src/types/ticket-service.js';
 
-const createMockIssue = (overrides: Partial<LinearIssue> = {}): LinearIssue => ({
+const createMockIssue = (overrides: Partial<NormalizedIssue> = {}): NormalizedIssue => ({
   id: 'issue-123',
   identifier: 'PROJ-42',
   title: 'Fix the bug',
   description: 'A detailed description of the bug.',
-  priority: 2,
+  priority: 'high',
   state: {
     id: 'state-1',
     name: 'In Progress',
@@ -86,12 +86,11 @@ describe('Prompt Builder', () => {
     });
 
     it('should format all priority levels correctly', () => {
-      expect(buildTaskFileContent(createMockIssue({ priority: 0 }))).toContain('No priority');
-      expect(buildTaskFileContent(createMockIssue({ priority: 1 }))).toContain('Urgent');
-      expect(buildTaskFileContent(createMockIssue({ priority: 2 }))).toContain('High');
-      expect(buildTaskFileContent(createMockIssue({ priority: 3 }))).toContain('Medium');
-      expect(buildTaskFileContent(createMockIssue({ priority: 4 }))).toContain('Low');
-      expect(buildTaskFileContent(createMockIssue({ priority: 99 }))).toContain('Unknown');
+      expect(buildTaskFileContent(createMockIssue({ priority: 'none' }))).toContain('No priority');
+      expect(buildTaskFileContent(createMockIssue({ priority: 'urgent' }))).toContain('Urgent');
+      expect(buildTaskFileContent(createMockIssue({ priority: 'high' }))).toContain('High');
+      expect(buildTaskFileContent(createMockIssue({ priority: 'medium' }))).toContain('Medium');
+      expect(buildTaskFileContent(createMockIssue({ priority: 'low' }))).toContain('Low');
     });
   });
 

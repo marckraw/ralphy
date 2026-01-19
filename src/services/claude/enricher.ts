@@ -1,8 +1,9 @@
 /**
- * Pure functions for enriching Linear issues with AI-generated content.
+ * Pure functions for enriching issues with AI-generated content.
  */
 
-import type { LinearIssue } from '../../types/linear.js';
+import type { NormalizedIssue, NormalizedPriority } from '../../types/ticket-service.js';
+import { NORMALIZED_PRIORITY_LABELS } from '../../types/ticket-service.js';
 
 /**
  * Enriched issue structure.
@@ -29,18 +30,18 @@ export const ENRICHMENT_MARKERS = {
  * Builds the prompt for enriching an issue.
  * Pure function - no side effects.
  *
- * @param issue - The Linear issue to enrich
+ * @param issue - The issue to enrich
  * @param codebaseContext - Optional context about the codebase
  * @returns The enrichment prompt
  */
 export function buildEnrichmentPrompt(
-  issue: LinearIssue,
+  issue: NormalizedIssue,
   codebaseContext?: string
 ): string {
   const lines: string[] = [
-    '# Task: Enrich Linear Issue',
+    '# Task: Enrich Issue',
     '',
-    `You are enriching the Linear issue **${issue.identifier}** to make it actionable for an AI coding assistant.`,
+    `You are enriching the issue **${issue.identifier}** to make it actionable for an AI coding assistant.`,
     '',
     '## Current Issue',
     '',
@@ -117,15 +118,8 @@ export function buildEnrichmentPrompt(
 /**
  * Gets human-readable priority text.
  */
-function getPriorityText(priority: number): string {
-  const labels: Record<number, string> = {
-    0: 'No priority',
-    1: 'Urgent',
-    2: 'High',
-    3: 'Medium',
-    4: 'Low',
-  };
-  return labels[priority] ?? 'Unknown';
+function getPriorityText(priority: NormalizedPriority): string {
+  return NORMALIZED_PRIORITY_LABELS[priority];
 }
 
 /**

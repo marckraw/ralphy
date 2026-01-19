@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   parseConfig,
   createDefaultConfig,
-  RalphyConfigSchema,
+  RalphyConfigV1Schema,
   DEFAULT_LABELS,
   DEFAULT_CLAUDE_CONFIG,
 } from '../../src/types/config.js';
@@ -111,7 +111,7 @@ describe('Config Types', () => {
 
     it('should create valid config that passes schema validation', () => {
       const config = createDefaultConfig('lin_api_xxx', 'proj-123', 'My Project', 'team-456');
-      const result = RalphyConfigSchema.safeParse(config);
+      const result = RalphyConfigV1Schema.safeParse(config);
 
       expect(result.success).toBe(true);
     });

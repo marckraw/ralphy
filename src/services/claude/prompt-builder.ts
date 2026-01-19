@@ -2,14 +2,15 @@
  * Pure functions for building Claude prompts.
  */
 
-import type { LinearIssue } from '../../types/linear.js';
+import type { NormalizedIssue, NormalizedPriority } from '../../types/ticket-service.js';
+import { NORMALIZED_PRIORITY_LABELS } from '../../types/ticket-service.js';
 import { COMPLETION_MARKER } from './completion.js';
 
 /**
  * Options for building a task prompt.
  */
 export interface PromptOptions {
-  issue: LinearIssue;
+  issue: NormalizedIssue;
   iteration: number;
   maxIterations: number;
   progressFilePath: string;
@@ -19,10 +20,10 @@ export interface PromptOptions {
  * Builds the task context file content.
  * Pure function - no side effects.
  *
- * @param issue - The Linear issue to create context for
+ * @param issue - The issue to create context for
  * @returns Markdown content for the task file
  */
-export function buildTaskFileContent(issue: LinearIssue): string {
+export function buildTaskFileContent(issue: NormalizedIssue): string {
   const lines: string[] = [
     `# Task: ${issue.identifier}`,
     '',
@@ -51,25 +52,18 @@ export function buildTaskFileContent(issue: LinearIssue): string {
 /**
  * Gets human-readable priority text.
  */
-function getPriorityText(priority: number): string {
-  const labels: Record<number, string> = {
-    0: 'No priority',
-    1: 'Urgent',
-    2: 'High',
-    3: 'Medium',
-    4: 'Low',
-  };
-  return labels[priority] ?? 'Unknown';
+function getPriorityText(priority: NormalizedPriority): string {
+  return NORMALIZED_PRIORITY_LABELS[priority];
 }
 
 /**
  * Builds the initial progress file content.
  * Pure function - no side effects.
  *
- * @param issue - The Linear issue
+ * @param issue - The issue
  * @returns Initial progress file content
  */
-export function buildInitialProgressContent(issue: LinearIssue): string {
+export function buildInitialProgressContent(issue: NormalizedIssue): string {
   const timestamp = new Date().toISOString();
   return [
     `# Progress: ${issue.identifier}`,

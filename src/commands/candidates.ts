@@ -1,10 +1,10 @@
-import { initializeClient } from '../services/linear/client.js';
-import { fetchCandidateIssues } from '../services/linear/issues.js';
-import { loadConfig } from '../services/config/manager.js';
+import { loadConfigV2 } from '../services/config/manager.js';
+import { createTicketService } from '../services/ticket/factory.js';
 import { logger } from '../utils/logger.js';
 import { createSpinner } from '../utils/spinner.js';
 import { formatIssueTable } from '../utils/table.js';
-import { getPriorityLabel } from '../types/linear.js';
+import { getPriorityLabel, type NormalizedIssue } from '../types/ticket-service.js';
+import { isLinearProvider } from '../types/config.js';
 
 interface CandidatesOptions {
   json?: boolean | undefined;
@@ -13,28 +13,44 @@ interface CandidatesOptions {
 export async function candidatesCommand(options: CandidatesOptions = {}): Promise<void> {
   const { json = false } = options;
 
-  // Load config
-  const configResult = await loadConfig();
+  logger.debug('Starting candidates command');
+
+  // Load config (v2 normalized)
+  const configResult = await loadConfigV2();
   if (!configResult.success) {
     logger.error(configResult.error);
     process.exit(1);
   }
 
   const config = configResult.data;
+  logger.debug(`Provider type: ${config.provider.type}`);
+  logger.debug(`Candidate label: ${config.labels.candidate}`);
 
-  // Get API key from env (override) or config
-  const apiKey = process.env['LINEAR_API_KEY'] ?? config.linear.apiKey;
+  // Create ticket service based on provider
+  const ticketService = createTicketService(config);
+  logger.debug(`Ticket service created for provider: ${ticketService.provider}`);
 
-  // Initialize Linear client
-  initializeClient(apiKey);
+  // Get teamId based on provider type
+  const teamId = isLinearProvider(config.provider)
+    ? config.provider.config.teamId
+    : config.provider.config.projectId;
+
+  const projectId = isLinearProvider(config.provider)
+    ? config.provider.config.projectId
+    : undefined;
+
+  logger.debug(`Team/Project ID: ${teamId}`);
+  logger.debug(`Project ID filter: ${projectId ?? 'none'}`);
 
   // Fetch issues
   const spinner = createSpinner('Fetching candidate issues...').start();
-  const issuesResult = await fetchCandidateIssues(
-    config.linear.teamId,
-    config.linear.labels.candidate,
-    config.linear.projectId
-  );
+  logger.debug('Calling fetchIssuesByLabel...');
+
+  const issuesResult = await ticketService.fetchIssuesByLabel({
+    teamId,
+    labelName: config.labels.candidate,
+    projectId,
+  });
 
   if (!issuesResult.success) {
     spinner.fail('Failed to fetch issues');
@@ -46,7 +62,7 @@ export async function candidatesCommand(options: CandidatesOptions = {}): Promis
   spinner.succeed(`Found ${issues.length} candidate issue(s)`);
 
   if (issues.length === 0) {
-    logger.info(`\nNo issues found with the "${logger.highlight(config.linear.labels.candidate)}" label.`);
+    logger.info(`\nNo issues found with the "${logger.highlight(config.labels.candidate)}" label.`);
     logger.info(`Add this label to issues you want to consider for automation.`);
     return;
   }
@@ -58,7 +74,7 @@ export async function candidatesCommand(options: CandidatesOptions = {}): Promis
 
   // Display table
   console.log('');
-  const tableData = issues.map((issue) => ({
+  const tableData = issues.map((issue: NormalizedIssue) => ({
     identifier: issue.identifier,
     title: issue.title,
     priority: getPriorityLabel(issue.priority),

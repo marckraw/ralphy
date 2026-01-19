@@ -1,12 +1,11 @@
 /**
- * ralphy run - Execute the Ralph Wiggum loop for a Linear issue.
+ * ralphy run - Execute the Ralph Wiggum loop for an issue.
  */
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { initializeClient } from '../services/linear/client.js';
-import { fetchIssueById } from '../services/linear/issues.js';
-import { loadConfig } from '../services/config/manager.js';
+import { loadConfigV2 } from '../services/config/manager.js';
+import { createTicketService } from '../services/ticket/factory.js';
 import { getContextDir, getHistoryDir, ensureDir } from '../services/config/paths.js';
 import { executeClaude, isClaudeAvailable } from '../services/claude/executor.js';
 import { analyzeOutput } from '../services/claude/completion.js';
@@ -15,7 +14,7 @@ import { handleRateLimit } from '../services/claude/rate-limiter.js';
 import { logger } from '../utils/logger.js';
 import { createSpinner } from '../utils/spinner.js';
 import { notifySuccess, notifyFailure, notifyWarning } from '../utils/notify.js';
-import type { LinearIssue } from '../types/linear.js';
+import type { NormalizedIssue } from '../types/ticket-service.js';
 
 /**
  * Run command options.
@@ -58,7 +57,7 @@ interface HistoryEntry {
  * Writes progress file for the run.
  */
 async function writeProgressFile(
-  issue: LinearIssue,
+  issue: NormalizedIssue,
   contextDir: string
 ): Promise<string> {
   await ensureDir(contextDir);
@@ -120,7 +119,7 @@ async function autoCommit(identifier: string): Promise<void> {
 /**
  * Main run command implementation.
  *
- * @param issueIdentifier - The Linear issue identifier (e.g., PROJ-42)
+ * @param issueIdentifier - The issue identifier (e.g., PROJ-42)
  * @param options - Run options
  */
 export async function runCommand(
@@ -129,8 +128,8 @@ export async function runCommand(
 ): Promise<void> {
   const { autoCommit: shouldAutoCommit = false, notify: shouldNotify = false } = options;
 
-  // Load config
-  const configResult = await loadConfig();
+  // Load config (v2 normalized)
+  const configResult = await loadConfigV2();
   if (!configResult.success) {
     logger.error(configResult.error);
     process.exit(1);
@@ -146,15 +145,12 @@ export async function runCommand(
     process.exit(1);
   }
 
-  // Get API key from env (override) or config
-  const apiKey = process.env['LINEAR_API_KEY'] ?? config.linear.apiKey;
-
-  // Initialize Linear client
-  initializeClient(apiKey);
+  // Create ticket service based on provider
+  const ticketService = createTicketService(config);
 
   // Fetch the issue
   const spinner = createSpinner(`Fetching issue ${issueIdentifier}...`).start();
-  const issueResult = await fetchIssueById(issueIdentifier);
+  const issueResult = await ticketService.fetchIssueById(issueIdentifier);
 
   if (!issueResult.success) {
     spinner.fail('Failed to fetch issue');

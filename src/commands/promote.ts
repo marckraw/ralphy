@@ -1,6 +1,5 @@
-import { initializeClient } from '../services/linear/client.js';
-import { promoteToReady } from '../services/linear/issues.js';
-import { loadConfig } from '../services/config/manager.js';
+import { loadConfigV2 } from '../services/config/manager.js';
+import { createTicketService } from '../services/ticket/factory.js';
 import { logger } from '../utils/logger.js';
 import { createSpinner } from '../utils/spinner.js';
 
@@ -14,22 +13,19 @@ export async function promoteCommand(
 ): Promise<void> {
   const { dryRun = false } = options;
 
-  // Load config
-  const configResult = await loadConfig();
+  // Load config (v2 normalized)
+  const configResult = await loadConfigV2();
   if (!configResult.success) {
     logger.error(configResult.error);
     process.exit(1);
   }
 
   const config = configResult.data;
-  const candidateLabel = config.linear.labels.candidate;
-  const readyLabel = config.linear.labels.ready;
+  const candidateLabel = config.labels.candidate;
+  const readyLabel = config.labels.ready;
 
-  // Get API key from env (override) or config
-  const apiKey = process.env['LINEAR_API_KEY'] ?? config.linear.apiKey;
-
-  // Initialize Linear client
-  initializeClient(apiKey);
+  // Create ticket service based on provider
+  const ticketService = createTicketService(config);
 
   if (dryRun) {
     logger.info(`[Dry run] Would promote issue ${logger.highlight(issueId)}`);
@@ -38,9 +34,9 @@ export async function promoteCommand(
     return;
   }
 
-  // Promote the issue
+  // Promote the issue by swapping labels
   const spinner = createSpinner(`Promoting issue ${issueId}...`).start();
-  const result = await promoteToReady(issueId, candidateLabel, readyLabel);
+  const result = await ticketService.swapLabels(issueId, candidateLabel, readyLabel);
 
   if (!result.success) {
     spinner.fail('Failed to promote issue');
@@ -48,7 +44,18 @@ export async function promoteCommand(
     process.exit(1);
   }
 
+  const swapResult = result.data;
+
+  if (swapResult.alreadyHadTarget) {
+    spinner.warn(`Issue ${logger.highlight(issueId)} already has the "${readyLabel}" label`);
+    return;
+  }
+
   spinner.succeed(`Promoted ${logger.highlight(issueId)} to ready`);
-  logger.info(`  Removed: ${logger.highlight(candidateLabel)}`);
-  logger.info(`  Added: ${logger.highlight(readyLabel)}`);
+  if (swapResult.removed) {
+    logger.info(`  Removed: ${logger.highlight(swapResult.removed)}`);
+  }
+  if (swapResult.added) {
+    logger.info(`  Added: ${logger.highlight(swapResult.added)}`);
+  }
 }

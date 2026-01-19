@@ -8,16 +8,30 @@ import { readyCommand } from './commands/ready.js';
 import { runCommand } from './commands/run.js';
 import { enrichCommand } from './commands/enrich.js';
 import { promoteCommand } from './commands/promote.js';
+import { setLogLevel, debug } from './utils/logger.js';
 
 // Load environment variables
 dotenvConfig();
 
 const program = new Command();
 
+// Build identifier for debugging npm link issues
+const BUILD_ID = '20250119-v3-jira-enhanced-search';
+
 program
   .name('ralphy')
-  .description('CLI tool for AI-assisted development with Linear integration')
-  .version('1.0.0');
+  .description('CLI tool for AI-assisted development with Linear/Jira integration')
+  .version('1.0.0')
+  .option('-v, --verbose', 'Enable verbose logging')
+  .hook('preAction', (thisCommand) => {
+    const opts = thisCommand.opts();
+    if (opts['verbose']) {
+      setLogLevel('debug');
+      debug(`Ralphy CLI starting (build: ${BUILD_ID})`);
+      debug(`Node version: ${process.version}`);
+      debug(`Working directory: ${process.cwd()}`);
+    }
+  });
 
 program
   .command('init')

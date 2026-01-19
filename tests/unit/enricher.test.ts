@@ -7,14 +7,14 @@ import {
   buildEnrichmentClaudeArgs,
   ENRICHMENT_MARKERS,
 } from '../../src/services/claude/enricher.js';
-import type { LinearIssue } from '../../src/types/linear.js';
+import type { NormalizedIssue } from '../../src/types/ticket-service.js';
 
-const createMockIssue = (overrides: Partial<LinearIssue> = {}): LinearIssue => ({
+const createMockIssue = (overrides: Partial<NormalizedIssue> = {}): NormalizedIssue => ({
   id: 'issue-123',
   identifier: 'PROJ-42',
   title: 'Add user authentication',
   description: 'Implement user login and registration.',
-  priority: 2,
+  priority: 'high',
   state: {
     id: 'state-1',
     name: 'Todo',

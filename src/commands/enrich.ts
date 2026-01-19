@@ -1,18 +1,10 @@
 /**
- * ralphy enrich - Enrich Linear issues with AI-generated details.
+ * ralphy enrich - Enrich issues with AI-generated details.
  */
 
 import { execa } from 'execa';
-import { initializeClient } from '../services/linear/client.js';
-import {
-  fetchIssueById,
-  fetchCandidateIssues,
-  updateIssueDescription,
-  addLabelToIssue,
-  hasLabelByName,
-  filterUnenrichedIssues,
-} from '../services/linear/issues.js';
-import { loadConfig } from '../services/config/manager.js';
+import { loadConfigV2 } from '../services/config/manager.js';
+import { createTicketService } from '../services/ticket/factory.js';
 import { isClaudeAvailable } from '../services/claude/executor.js';
 import {
   buildEnrichmentPrompt,
@@ -23,7 +15,8 @@ import {
 } from '../services/claude/enricher.js';
 import { logger } from '../utils/logger.js';
 import { createSpinner } from '../utils/spinner.js';
-import type { LinearIssue } from '../types/linear.js';
+import type { NormalizedIssue, TicketService } from '../types/ticket-service.js';
+import { isLinearProvider } from '../types/config.js';
 
 /**
  * Enrich command options.
@@ -36,17 +29,39 @@ export interface EnrichOptions {
 }
 
 /**
+ * Helper function to check if an issue has a label by name.
+ */
+function hasLabelByName(
+  labels: Array<{ id: string; name: string }>,
+  labelName: string
+): boolean {
+  return labels.some((label) => label.name === labelName);
+}
+
+/**
+ * Filter issues to only those that don't have a specific label.
+ */
+function filterUnenrichedIssues(
+  issues: NormalizedIssue[],
+  labelName: string
+): NormalizedIssue[] {
+  return issues.filter((issue) => !hasLabelByName(issue.labels, labelName));
+}
+
+/**
  * Enriches a single issue using Claude.
  *
  * @param issue - The issue to enrich
- * @param dryRun - If true, don't update Linear, just show the result
+ * @param ticketService - The ticket service to use for updates
+ * @param dryRun - If true, don't update the issue, just show the result
  * @param verbose - If true, stream Claude's output
  * @param enrichedLabelName - The name of the label to add after enrichment
  * @param model - The Claude model to use
  * @returns True if enrichment was successful
  */
 async function enrichSingleIssue(
-  issue: LinearIssue,
+  issue: NormalizedIssue,
+  ticketService: TicketService,
   dryRun: boolean,
   verbose: boolean,
   enrichedLabelName: string,
@@ -187,25 +202,25 @@ async function enrichSingleIssue(
     console.log('');
 
     if (dryRun) {
-      logger.info(`[Dry run] Would update ${issue.identifier} description in Linear.`);
+      logger.info(`[Dry run] Would update ${issue.identifier} description.`);
       return true;
     }
 
-    // Update Linear issue
-    const updateSpinner = createSpinner('Updating Linear issue...').start();
-    const updateResult = await updateIssueDescription(issue.identifier, enrichedMarkdown);
+    // Update issue description
+    const updateSpinner = createSpinner('Updating issue...').start();
+    const updateResult = await ticketService.updateIssueDescription(issue.identifier, enrichedMarkdown);
 
     if (!updateResult.success) {
-      updateSpinner.fail('Failed to update Linear issue');
+      updateSpinner.fail('Failed to update issue');
       logger.error(updateResult.error);
       return false;
     }
 
-    updateSpinner.succeed(`Updated ${issue.identifier} in Linear`);
+    updateSpinner.succeed(`Updated ${issue.identifier}`);
 
     // Add enriched label
     const labelSpinner = createSpinner(`Adding "${enrichedLabelName}" label...`).start();
-    const labelResult = await addLabelToIssue(issue.identifier, enrichedLabelName);
+    const labelResult = await ticketService.addLabelToIssue(issue.identifier, enrichedLabelName);
 
     if (!labelResult.success) {
       labelSpinner.fail('Failed to add enriched label');
@@ -227,7 +242,7 @@ async function enrichSingleIssue(
 /**
  * Main enrich command implementation.
  *
- * @param issueIdentifier - The Linear issue identifier (e.g., PROJ-42) or undefined for --all-candidates
+ * @param issueIdentifier - The issue identifier (e.g., PROJ-42) or undefined for --all-candidates
  * @param options - Enrich options
  */
 export async function enrichCommand(
@@ -242,8 +257,8 @@ export async function enrichCommand(
     process.exit(1);
   }
 
-  // Load config
-  const configResult = await loadConfig();
+  // Load config (v2 normalized)
+  const configResult = await loadConfigV2();
   if (!configResult.success) {
     logger.error(configResult.error);
     process.exit(1);
@@ -258,25 +273,31 @@ export async function enrichCommand(
     process.exit(1);
   }
 
-  // Get API key from env (override) or config
-  const apiKey = process.env['LINEAR_API_KEY'] ?? config.linear.apiKey;
-
-  // Initialize Linear client
-  initializeClient(apiKey);
+  // Create ticket service based on provider
+  const ticketService = createTicketService(config);
 
   if (dryRun) {
-    logger.info(logger.dim('[Dry run mode - no changes will be made to Linear]'));
+    logger.info(logger.dim('[Dry run mode - no changes will be made]'));
     console.log('');
   }
+
+  // Get teamId based on provider type
+  const teamId = isLinearProvider(config.provider)
+    ? config.provider.config.teamId
+    : config.provider.config.projectId;
+
+  const projectId = isLinearProvider(config.provider)
+    ? config.provider.config.projectId
+    : undefined;
 
   if (allCandidates) {
     // Enrich all candidate issues
     const spinner = createSpinner('Fetching candidate issues...').start();
-    const issuesResult = await fetchCandidateIssues(
-      config.linear.teamId,
-      config.linear.labels.candidate,
-      config.linear.projectId
-    );
+    const issuesResult = await ticketService.fetchIssuesByLabel({
+      teamId,
+      labelName: config.labels.candidate,
+      projectId,
+    });
 
     if (!issuesResult.success) {
       spinner.fail('Failed to fetch issues');
@@ -288,12 +309,12 @@ export async function enrichCommand(
     spinner.succeed(`Found ${allCandidateIssues.length} candidate issue(s)`);
 
     if (allCandidateIssues.length === 0) {
-      logger.info(`\nNo issues found with the "${logger.highlight(config.linear.labels.candidate)}" label.`);
+      logger.info(`\nNo issues found with the "${logger.highlight(config.labels.candidate)}" label.`);
       return;
     }
 
     // Filter out already-enriched issues unless --force is used
-    const enrichedLabelName = config.linear.labels.enriched;
+    const enrichedLabelName = config.labels.enriched;
     let issuesToProcess = allCandidateIssues;
     let skippedCount = 0;
 
@@ -327,7 +348,7 @@ export async function enrichCommand(
     let failCount = 0;
 
     for (const issue of issuesToProcess) {
-      const success = await enrichSingleIssue(issue, dryRun, verbose, enrichedLabelName, config.claude.model);
+      const success = await enrichSingleIssue(issue, ticketService, dryRun, verbose, enrichedLabelName, config.claude.model);
       if (success) {
         successCount++;
       } else {
@@ -356,7 +377,7 @@ export async function enrichCommand(
   } else if (issueIdentifier) {
     // Enrich single issue
     const spinner = createSpinner(`Fetching issue ${issueIdentifier}...`).start();
-    const issueResult = await fetchIssueById(issueIdentifier);
+    const issueResult = await ticketService.fetchIssueById(issueIdentifier);
 
     if (!issueResult.success) {
       spinner.fail('Failed to fetch issue');
@@ -367,7 +388,7 @@ export async function enrichCommand(
     const issue = issueResult.data;
     spinner.succeed(`Found issue: ${issue.identifier} - ${issue.title}`);
 
-    const enrichedLabelName = config.linear.labels.enriched;
+    const enrichedLabelName = config.labels.enriched;
 
     // Check if already enriched and warn (but still proceed unless --force is required)
     if (hasLabelByName(issue.labels, enrichedLabelName)) {
@@ -383,7 +404,7 @@ export async function enrichCommand(
       );
     }
 
-    const success = await enrichSingleIssue(issue, dryRun, verbose, enrichedLabelName, config.claude.model);
+    const success = await enrichSingleIssue(issue, ticketService, dryRun, verbose, enrichedLabelName, config.claude.model);
 
     if (!success) {
       process.exit(1);

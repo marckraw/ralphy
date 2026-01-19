@@ -1,7 +1,9 @@
 import fs from 'node:fs/promises';
 import {
   type RalphyConfig,
+  type RalphyConfigV2,
   parseConfig,
+  normalizeConfig,
   createDefaultConfig,
   type Result,
 } from '../../types/config.js';
@@ -12,6 +14,9 @@ import {
   ralphyDirExists,
 } from './paths.js';
 
+/**
+ * Loads config in v1 format (backwards compatible).
+ */
 export async function loadConfig(cwd: string = process.cwd()): Promise<Result<RalphyConfig>> {
   const configPath = getConfigPath(cwd);
 
@@ -41,8 +46,64 @@ export async function loadConfig(cwd: string = process.cwd()): Promise<Result<Ra
   }
 }
 
+/**
+ * Loads and normalizes config to v2 format.
+ * Automatically migrates v1 configs to v2 in memory.
+ */
+export async function loadConfigV2(cwd: string = process.cwd()): Promise<Result<RalphyConfigV2>> {
+  const configPath = getConfigPath(cwd);
+
+  try {
+    const exists = await configExists(cwd);
+    if (!exists) {
+      return {
+        success: false,
+        error: `Config not found at ${configPath}. Run 'ralphy init' first.`,
+      };
+    }
+
+    const content = await fs.readFile(configPath, 'utf-8');
+    const raw: unknown = JSON.parse(content);
+    return normalizeConfig(raw);
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      return {
+        success: false,
+        error: `Invalid JSON in config file: ${err.message}`,
+      };
+    }
+    return {
+      success: false,
+      error: `Failed to read config: ${err instanceof Error ? err.message : 'Unknown error'}`,
+    };
+  }
+}
+
 export async function saveConfig(
   config: RalphyConfig,
+  cwd: string = process.cwd()
+): Promise<Result<void>> {
+  try {
+    const exists = await ralphyDirExists(cwd);
+    if (!exists) {
+      await createRalphyStructure(cwd);
+    }
+
+    const configPath = getConfigPath(cwd);
+    const content = JSON.stringify(config, null, 2);
+    await fs.writeFile(configPath, content, 'utf-8');
+
+    return { success: true, data: undefined };
+  } catch (err) {
+    return {
+      success: false,
+      error: `Failed to save config: ${err instanceof Error ? err.message : 'Unknown error'}`,
+    };
+  }
+}
+
+export async function saveConfigV2(
+  config: RalphyConfigV2,
   cwd: string = process.cwd()
 ): Promise<Result<void>> {
   try {
