@@ -2,8 +2,7 @@ name: Release
 
 on:
   push:
-    branches:
-      - master
+    branches: [master]
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -15,35 +14,32 @@ jobs:
       published: ${{ steps.changesets.outputs.published }}
       publishedPackages: ${{ steps.changesets.outputs.publishedPackages }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          version: 9.15.0
+          bun-version: latest
 
-      - name: Setup Node.js
+      - name: Setup Node.js (for changesets)
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
-        run: pnpm install
+        run: bun install
 
-      - name: Build packages in order
+      - name: Build packages
         run: |
-          pnpm --filter @mrck-labs/ralphy-shared build
-          pnpm --filter @mrck-labs/ralphy build
-          pnpm --filter @mrck-labs/ralphy-webhook build
+          bun run --cwd packages/shared build
+          bun run --cwd apps/cli build
 
       - name: Create Release Pull Request or Publish
         id: changesets
         uses: changesets/action@v1
         with:
-          publish: pnpm release
+          publish: bun run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -70,30 +66,18 @@ jobs:
             binary_name: ralphy-windows-x64.exe
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9.15.0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'pnpm'
-
       - name: Install dependencies
-        run: pnpm install
+        run: bun install
 
       - name: Build shared package
-        run: pnpm --filter @mrck-labs/ralphy-shared build
+        run: bun run --cwd packages/shared build
 
       - name: Build binary
         run: bun build ./apps/cli/src/index.ts --compile --target=${{ matrix.target }} --outfile=dist-binaries/${{ matrix.binary_name }}
@@ -110,15 +94,14 @@ jobs:
     if: needs.release.outputs.published == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: binaries
 
-      - name: Get version from published packages
+      - name: Get version
         id: version
         run: |
           VERSION=$(echo '${{ needs.release.outputs.publishedPackages }}' | jq -r '.[] | select(.name == "@mrck-labs/ralphy") | .version')

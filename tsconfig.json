@@ -3,6 +3,11 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "baseUrl": ".",
+    "paths": {
+      "@mrck-labs/ralphy-shared": ["packages/shared/dist/index.d.ts"],
+      "@mrck-labs/ralphy-shared/*": ["packages/shared/dist/*"]
+    },
     "lib": ["ES2022"],
     "strict": true,
     "strictNullChecks": true,

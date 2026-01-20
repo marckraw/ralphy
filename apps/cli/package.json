@@ -8,13 +8,12 @@
     "ralphy": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsx src/index.ts",
-    "start": "node dist/index.js",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "build": "tsc --build",
+    "dev": "bun run src/index.ts",
+    "start": "bun run dist/index.js",
+    "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "build:binary": "bun build ./src/index.ts --compile --outfile=dist-binaries/ralphy",
     "build:binary:all": "bun run build:binary:darwin-arm64 && bun run build:binary:darwin-x64 && bun run build:binary:linux-x64 && bun run build:binary:windows-x64",
     "build:binary:darwin-arm64": "bun build ./src/index.ts --compile --target=bun-darwin-arm64 --outfile=dist-binaries/ralphy-darwin-arm64",
@@ -61,8 +60,6 @@
   "devDependencies": {
     "@types/inquirer": "^9.0.7",
     "@types/node": "^22.0.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
+    "typescript": "^5.7.0"
   }
 }
