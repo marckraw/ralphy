@@ -1,5 +1,16 @@
 # @mrck-labs/ralphy
 
+## 1.2.0
+
+### Minor Changes
+
+- f65a919: fix upload artifacts
+
+### Patch Changes
+
+- Updated dependencies [f65a919]
+  - @mrck-labs/ralphy-shared@1.2.0
+
 ## 1.1.0
 
 ### Minor Changes
