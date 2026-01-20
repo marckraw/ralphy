@@ -84,6 +84,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Build shared package first
+        run: pnpm --filter @mrck-labs/ralphy-shared build
+
       - name: Build all packages
         run: pnpm build
 
