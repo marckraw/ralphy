@@ -4,9 +4,6 @@ node_modules/
 # Build output
 dist/
 
-# Turbo
-.turbo/
-
 # Environment
 .env
 .env.local
@@ -38,3 +35,6 @@ coverage/
 # Temporary files
 *.tmp
 *.temp
+
+# Binary builds
+dist-binaries/

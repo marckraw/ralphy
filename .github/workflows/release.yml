@@ -2,8 +2,7 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
+    branches: [master]
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
@@ -11,27 +10,113 @@ jobs:
   release:
     name: Release
     runs-on: ubuntu-latest
+    outputs:
+      published: ${{ steps.changesets.outputs.published }}
+      publishedPackages: ${{ steps.changesets.outputs.publishedPackages }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          version: 9.15.0
+          bun-version: latest
 
-      - name: Setup Node.js
+      - name: Setup Node.js (for changesets)
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
-        run: pnpm install
+        run: bun install
 
-      - name: Create Release Pull Request
+      - name: Build packages
+        run: |
+          bun run --cwd packages/shared build
+          bun run --cwd apps/cli build
+
+      - name: Create Release Pull Request or Publish
+        id: changesets
         uses: changesets/action@v1
         with:
-          publish: pnpm release
+          publish: bun run release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  build-binaries:
+    name: Build Binaries
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: bun-darwin-arm64
+            binary_name: ralphy-darwin-arm64
+          - os: macos-13
+            target: bun-darwin-x64
+            binary_name: ralphy-darwin-x64
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            binary_name: ralphy-linux-x64
+          - os: windows-latest
+            target: bun-windows-x64
+            binary_name: ralphy-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build shared package
+        run: bun run --cwd packages/shared build
+
+      - name: Build binary
+        run: bun build ./apps/cli/src/index.ts --compile --target=${{ matrix.target }} --outfile=dist-binaries/${{ matrix.binary_name }}
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.binary_name }}
+          path: dist-binaries/${{ matrix.binary_name }}
+
+  create-github-release:
+    name: Create GitHub Release
+    needs: [release, build-binaries]
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: binaries
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(echo '${{ needs.release.outputs.publishedPackages }}' | jq -r '.[] | select(.name == "@mrck-labs/ralphy") | .version')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Release v${{ steps.version.outputs.version }}
+          files: |
+            binaries/ralphy-darwin-arm64/ralphy-darwin-arm64
+            binaries/ralphy-darwin-x64/ralphy-darwin-x64
+            binaries/ralphy-linux-x64/ralphy-linux-x64
+            binaries/ralphy-windows-x64.exe/ralphy-windows-x64.exe
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

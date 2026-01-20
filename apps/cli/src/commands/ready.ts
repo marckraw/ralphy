@@ -5,7 +5,7 @@ import {
   getPriorityLabel,
   isLinearProvider,
   type NormalizedIssue,
-} from '@ralphy/shared';
+} from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../utils/spinner.js';
 import { formatIssueTable } from '../utils/table.js';
 

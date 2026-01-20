@@ -1,7 +1,6 @@
 ---
-"@ralphy/cli": minor
-"@ralphy/webhook-service": minor
-"@ralphy/shared": minor
+"@mrck-labs/ralphy": minor
+"@mrck-labs/ralphy-shared": minor
 ---
 
 ralphy run and other commands

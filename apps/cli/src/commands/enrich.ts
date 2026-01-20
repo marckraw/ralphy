@@ -10,7 +10,7 @@ import {
   isLinearProvider,
   type NormalizedIssue,
   type TicketService,
-} from '@ralphy/shared';
+} from '@mrck-labs/ralphy-shared';
 import { isClaudeAvailable } from '../services/claude/executor.js';
 import {
   buildEnrichmentPrompt,

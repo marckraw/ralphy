@@ -16,7 +16,7 @@ import {
   type NormalizedIssue,
   type TicketService,
   type RalphyConfigV2,
-} from '@ralphy/shared';
+} from '@mrck-labs/ralphy-shared';
 import { getContextDir, getHistoryDir, ensureDir } from '../services/config/paths.js';
 import { executeClaude, isClaudeAvailable } from '../services/claude/executor.js';
 import { analyzeOutput } from '../services/claude/completion.js';
@@ -24,6 +24,57 @@ import { buildPrompt, buildInitialProgressContent } from '../services/claude/pro
 import { handleRateLimit } from '../services/claude/rate-limiter.js';
 import { createSpinner } from '../utils/spinner.js';
 import { notifySuccess, notifyFailure, notifyWarning } from '../utils/notify.js';
+
+/**
+ * Emergency stop state for graceful shutdown.
+ */
+let emergencyStopRequested = false;
+let forceStopRequested = false;
+
+/**
+ * Sets up emergency stop handler for Ctrl+C.
+ * First press: graceful stop after current issue.
+ * Second press: force exit immediately.
+ */
+function setupEmergencyStopHandler(): void {
+  const handler = (): void => {
+    if (forceStopRequested) {
+      // Already requested force stop, just exit
+      process.exit(1);
+    }
+
+    if (emergencyStopRequested) {
+      // Second press - force exit
+      forceStopRequested = true;
+      console.log('\n');
+      logger.warn('Force stop requested. Exiting immediately...');
+      process.exit(1);
+    }
+
+    // First press - graceful stop
+    emergencyStopRequested = true;
+    console.log('\n');
+    logger.warn('Emergency stop requested. Will stop after current issue completes.');
+    logger.warn('Press Ctrl+C again to force exit immediately.');
+  };
+
+  process.on('SIGINT', handler);
+}
+
+/**
+ * Resets emergency stop state (for testing or re-runs).
+ */
+function resetEmergencyStopState(): void {
+  emergencyStopRequested = false;
+  forceStopRequested = false;
+}
+
+/**
+ * Checks if emergency stop was requested.
+ */
+function isEmergencyStopRequested(): boolean {
+  return emergencyStopRequested;
+}
 
 /**
  * Run command options.
@@ -189,9 +240,27 @@ _Automated by [Ralphy CLI](https://github.com/ralphy)_`;
 }
 
 /**
+ * Maximum length for execution log in Linear comments.
+ * Linear has a limit, and very long logs are hard to read.
+ */
+const MAX_LOG_LENGTH = 50000;
+
+/**
+ * Truncates log output if it exceeds the maximum length.
+ */
+function truncateLog(log: string, maxLength: number = MAX_LOG_LENGTH): string {
+  if (log.length <= maxLength) {
+    return log;
+  }
+
+  const truncateNote = `\n\n... [Log truncated - showing last ${maxLength} characters] ...\n\n`;
+  return truncateNote + log.slice(-maxLength + truncateNote.length);
+}
+
+/**
  * Builds the completion comment for Linear.
  */
-function buildCompletionComment(result: RunResult): string {
+function buildCompletionComment(result: RunResult, executionLog?: string): string {
   const timestamp = new Date().toISOString();
   const statusEmoji = result.status === 'completed' ? '✅' : result.status === 'max_iterations' ? '⚠️' : '❌';
   const statusText = result.status === 'completed'
@@ -200,6 +269,17 @@ function buildCompletionComment(result: RunResult): string {
       ? 'Stopped at max iterations (may need manual review)'
       : `Failed: ${result.error ?? 'Unknown error'}`;
 
+  const statusMessage = result.status === 'completed'
+    ? 'Changes have been committed to git. Please review and merge.'
+    : result.status === 'max_iterations'
+      ? 'The task may not be fully complete. Please review the current state and re-run if needed.'
+      : 'Please check the error and retry.';
+
+  // Build the log section if we have execution log
+  const logSection = executionLog
+    ? `\n<details>\n<summary>📋 Execution Log (click to expand)</summary>\n\n\`\`\`\n${truncateLog(executionLog)}\n\`\`\`\n\n</details>\n`
+    : '';
+
   return `## Ralphy Work ${result.status === 'completed' ? 'Completed' : 'Stopped'}
 
 ${statusEmoji} **Status:** ${statusText}
@@ -207,12 +287,8 @@ ${statusEmoji} **Status:** ${statusText}
 **Duration:** ${formatDuration(result.totalDurationMs)}
 **Finished at:** ${timestamp}
 
-${result.status === 'completed'
-  ? 'Changes have been committed to git. Please review and merge.'
-  : result.status === 'max_iterations'
-    ? 'The task may not be fully complete. Please review the current state and re-run if needed.'
-    : 'Please check the error and retry.'}
-
+${statusMessage}
+${logSection}
 ---
 _Automated by [Ralphy CLI](https://github.com/ralphy)_`;
 }
@@ -382,9 +458,9 @@ async function runSingleIssue(
   logger.info('\nCommitting changes to git...');
   await gitCommit(issue.identifier, issue.title);
 
-  // Add completion comment to Linear
+  // Add completion comment to Linear (includes execution log)
   if (addComments) {
-    const completionComment = buildCompletionComment(result);
+    const completionComment = buildCompletionComment(result, fullOutput);
     const commentResult = await ticketService.addComment(issue.identifier, completionComment);
     if (!commentResult.success) {
       logger.warn(`Failed to add completion comment: ${commentResult.error}`);
@@ -568,7 +644,20 @@ export async function runCommand(
   const results: RunResult[] = [];
   const batchStartTime = Date.now();
 
+  // Set up emergency stop handler for batch mode
+  if (allReady && issuesToProcess.length > 1) {
+    resetEmergencyStopState();
+    setupEmergencyStopHandler();
+    logger.info(logger.dim('Tip: Press Ctrl+C to stop after current issue, twice to force exit.\n'));
+  }
+
   for (let i = 0; i < issuesToProcess.length; i++) {
+    // Check for emergency stop before starting a new issue
+    if (isEmergencyStopRequested()) {
+      logger.warn(`\nEmergency stop: Skipping remaining ${issuesToProcess.length - i} issue(s).`);
+      break;
+    }
+
     const issue = issuesToProcess[i];
     if (!issue) continue;
 
@@ -612,15 +701,18 @@ export async function runCommand(
     const completed = results.filter(r => r.status === 'completed').length;
     const maxIter = results.filter(r => r.status === 'max_iterations').length;
     const errors = results.filter(r => r.status === 'error').length;
+    const skippedByStop = issuesToProcess.length - results.length;
+    const stoppedEarly = isEmergencyStopRequested();
 
     console.log('\n');
     logger.info(`${'='.repeat(60)}`);
-    logger.info('Ralph Wiggum Batch Summary');
+    logger.info(`Ralph Wiggum Batch Summary${stoppedEarly ? ' (Emergency Stop)' : ''}`);
     logger.info(`${'='.repeat(60)}`);
-    logger.info(`Total issues processed: ${results.length}`);
+    logger.info(`Total issues processed: ${results.length}${skippedByStop > 0 ? ` (${skippedByStop} skipped due to emergency stop)` : ''}`);
     logger.success(`Completed: ${completed}`);
     if (maxIter > 0) logger.warn(`Max iterations reached: ${maxIter}`);
     if (errors > 0) logger.error(`Errors: ${errors}`);
+    if (skippedByStop > 0) logger.warn(`Skipped (emergency stop): ${skippedByStop}`);
     logger.info(`Total duration: ${formatDuration(batchDuration)}`);
     logger.info(`Total iterations: ${results.reduce((sum, r) => sum + r.iterations, 0)}`);
 
@@ -629,6 +721,9 @@ export async function runCommand(
       const emoji = result.status === 'completed' ? '✅' : result.status === 'max_iterations' ? '⚠️' : '❌';
       logger.info(`  ${emoji} ${result.issue.identifier}: ${result.status} (${result.iterations} iterations, ${formatDuration(result.totalDurationMs)})`);
     }
+
+    // Reset emergency stop state for potential future runs in same process
+    resetEmergencyStopState();
 
     if (errors > 0) {
       process.exit(1);

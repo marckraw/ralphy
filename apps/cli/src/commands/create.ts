@@ -13,7 +13,7 @@ import {
   type ParsedTask,
   type TicketService,
   type CreatedIssue,
-} from '@ralphy/shared';
+} from '@mrck-labs/ralphy-shared';
 import { isClaudeAvailable } from '../services/claude/executor.js';
 import {
   buildTaskParserPrompt,

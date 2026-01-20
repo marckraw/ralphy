@@ -3,7 +3,7 @@
  */
 
 import { execa, type ExecaError } from 'execa';
-import type { Result } from '@ralphy/shared';
+import type { Result } from '@mrck-labs/ralphy-shared';
 
 /**
  * Options for executing Claude CLI.

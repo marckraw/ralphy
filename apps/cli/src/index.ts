@@ -9,7 +9,7 @@ import { runCommand } from './commands/run.js';
 import { enrichCommand } from './commands/enrich.js';
 import { promoteCommand } from './commands/promote.js';
 import { createCommand } from './commands/create.js';
-import { setLogLevel, debug } from '@ralphy/shared/utils';
+import { setLogLevel, debug } from '@mrck-labs/ralphy-shared/utils';
 
 // Load environment variables
 dotenvConfig();

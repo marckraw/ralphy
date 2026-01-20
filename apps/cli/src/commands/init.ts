@@ -9,7 +9,7 @@ import {
   createJiraConfigV2,
   type NormalizedTeam,
   type NormalizedProject,
-} from '@ralphy/shared';
+} from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../utils/spinner.js';
 import { Version3Client } from 'jira.js';
 

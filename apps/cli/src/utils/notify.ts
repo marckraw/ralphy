@@ -4,7 +4,7 @@
 
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import { logger } from '@ralphy/shared';
+import { logger } from '@mrck-labs/ralphy-shared';
 
 const execAsync = promisify(exec);
 

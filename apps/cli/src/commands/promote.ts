@@ -1,5 +1,5 @@
 import { loadConfigV2 } from '../services/config/manager.js';
-import { createTicketService, logger } from '@ralphy/shared';
+import { createTicketService, logger } from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../utils/spinner.js';
 
 interface PromoteOptions {
