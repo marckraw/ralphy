@@ -50,17 +50,22 @@ jobs:
     needs: release
     if: needs.release.outputs.published == 'true'
     strategy:
+      fail-fast: false
       matrix:
         include:
+          # macOS ARM64 - native build
           - os: macos-latest
             target: bun-darwin-arm64
             binary_name: ralphy-darwin-arm64
-          - os: macos-13
+          # macOS x64 - cross-compile from ARM64
+          - os: macos-latest
             target: bun-darwin-x64
             binary_name: ralphy-darwin-x64
+          # Linux x64 - native build
           - os: ubuntu-latest
             target: bun-linux-x64
             binary_name: ralphy-linux-x64
+          # Windows x64 - native build
           - os: windows-latest
             target: bun-windows-x64
             binary_name: ralphy-windows-x64.exe
@@ -88,35 +93,35 @@ jobs:
           name: ${{ matrix.binary_name }}
           path: dist-binaries/${{ matrix.binary_name }}
 
-  create-github-release:
-    name: Create GitHub Release
+  upload-to-release:
+    name: Upload Binaries to Release
     needs: [release, build-binaries]
     if: needs.release.outputs.published == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: binaries
 
-      - name: Get version
+      - name: Get version and tag
         id: version
         run: |
           VERSION=$(echo '${{ needs.release.outputs.publishedPackages }}' | jq -r '.[] | select(.name == "@mrck-labs/ralphy") | .version')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=@mrck-labs/ralphy@$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Create GitHub Release
+      - name: List downloaded artifacts
+        run: find binaries -type f
+
+      - name: Upload binaries to existing release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: Release v${{ steps.version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.tag }}
           files: |
             binaries/ralphy-darwin-arm64/ralphy-darwin-arm64
             binaries/ralphy-darwin-x64/ralphy-darwin-x64
             binaries/ralphy-linux-x64/ralphy-linux-x64
             binaries/ralphy-windows-x64.exe/ralphy-windows-x64.exe
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
