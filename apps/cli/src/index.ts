@@ -9,6 +9,7 @@ import { runCommand } from './commands/run.js';
 import { enrichCommand } from './commands/enrich.js';
 import { promoteCommand } from './commands/promote.js';
 import { createCommand } from './commands/create.js';
+import { statusCommand } from './commands/status.js';
 import { setLogLevel, debug } from '@mrck-labs/ralphy-shared/utils';
 
 // Load environment variables
@@ -147,6 +148,19 @@ program
         verbose: options.verbose,
         status: options.status,
       });
+    } catch (err) {
+      console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
+      process.exit(1);
+    }
+  });
+
+program
+  .command('status')
+  .description('Display comprehensive status information about the Ralphy environment')
+  .option('--json', 'Output as JSON')
+  .action(async (options: { json?: boolean }) => {
+    try {
+      await statusCommand({ json: options.json });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
       process.exit(1);
