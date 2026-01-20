@@ -1,5 +1,11 @@
 # @mrck-labs/ralphy
 
+## 1.3.0
+
+### Minor Changes
+
+- d134c90: Add --verbose flag to run command to show Claude tool activity in real-time
+
 ## 1.2.0
 
 ### Minor Changes
