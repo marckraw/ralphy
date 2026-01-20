@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import type { Result } from './config.js';
+import type { CreateIssueOptions, CreatedIssue } from './task-input.js';
 
 // Re-export Result types from config for convenience
 export type { Result, ParseResult, ParseError } from './config.js';
+export type { CreateIssueOptions, CreatedIssue } from './task-input.js';
 
 // Normalized priority levels across providers
 export type NormalizedPriority = 'urgent' | 'high' | 'medium' | 'low' | 'none';
@@ -143,6 +145,24 @@ export interface TicketService {
     removeLabel: string,
     addLabel: string
   ): Promise<Result<SwapResult>>;
+
+  /**
+   * Creates a new issue.
+   */
+  createIssue(options: CreateIssueOptions): Promise<Result<CreatedIssue>>;
+
+  /**
+   * Adds a comment to an issue.
+   * Used for tracking progress and status updates.
+   */
+  addComment(issueId: string, body: string): Promise<Result<void>>;
+
+  /**
+   * Updates the state/status of an issue.
+   * @param issueId - The issue identifier
+   * @param stateName - The target state name (e.g., "In Review", "Done")
+   */
+  updateIssueState(issueId: string, stateName: string): Promise<Result<void>>;
 }
 
 // Priority mapping utilities
@@ -153,6 +173,15 @@ export const LINEAR_TO_NORMALIZED_PRIORITY: Record<number, NormalizedPriority> =
     2: 'high',
     3: 'medium',
     4: 'low',
+  };
+
+export const NORMALIZED_TO_LINEAR_PRIORITY: Record<NormalizedPriority, number> =
+  {
+    none: 0,
+    urgent: 1,
+    high: 2,
+    medium: 3,
+    low: 4,
   };
 
 export const JIRA_TO_NORMALIZED_PRIORITY: Record<string, NormalizedPriority> = {
@@ -170,6 +199,10 @@ export const JIRA_TO_NORMALIZED_PRIORITY: Record<string, NormalizedPriority> = {
 
 export function normalizeLinearPriority(priority: number): NormalizedPriority {
   return LINEAR_TO_NORMALIZED_PRIORITY[priority] ?? 'none';
+}
+
+export function normalizedToLinearPriority(priority: NormalizedPriority): number {
+  return NORMALIZED_TO_LINEAR_PRIORITY[priority] ?? 0;
 }
 
 export function normalizeJiraPriority(

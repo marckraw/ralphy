@@ -4,6 +4,8 @@ import type {
   LinearProviderConfig,
 } from '../../../types/config.js';
 import type {
+  CreateIssueOptions,
+  CreatedIssue,
   FetchIssuesByLabelOptions,
   NormalizedIssue,
   NormalizedLabel,
@@ -13,7 +15,10 @@ import type {
   SwapResult,
   TicketService,
 } from '../../../types/ticket-service.js';
-import { normalizeLinearPriority } from '../../../types/ticket-service.js';
+import {
+  normalizeLinearPriority,
+  normalizedToLinearPriority,
+} from '../../../types/ticket-service.js';
 
 /**
  * TicketService implementation for Linear.
@@ -318,6 +323,115 @@ export class LinearTicketService implements TicketService {
     };
   }
 
+  async createIssue(options: CreateIssueOptions): Promise<Result<CreatedIssue>> {
+    const { teamId, projectId, title, description, priority, labelNames, stateName } =
+      options;
+
+    try {
+      // Resolve label names to IDs
+      const labelIds: string[] = [];
+      if (labelNames && labelNames.length > 0) {
+        for (const labelName of labelNames) {
+          const labelIdResult = await this.getLabelIdByName(labelName);
+          if (!labelIdResult.success) {
+            return labelIdResult;
+          }
+          labelIds.push(labelIdResult.data);
+        }
+      }
+
+      // Resolve state name to ID if provided
+      let stateId: string | undefined;
+      if (stateName) {
+        const stateIdResult = await this.getStateIdByName(teamId, stateName);
+        if (!stateIdResult.success) {
+          return stateIdResult;
+        }
+        stateId = stateIdResult.data;
+      }
+
+      // Create the issue - only include optional fields if they have values
+      // to satisfy exactOptionalPropertyTypes
+      const issuePayload = await this.client.createIssue({
+        teamId,
+        title,
+        ...(description !== undefined && { description }),
+        ...(priority !== undefined && { priority: normalizedToLinearPriority(priority) }),
+        ...(projectId !== undefined && { projectId }),
+        ...(labelIds.length > 0 && { labelIds }),
+        ...(stateId !== undefined && { stateId }),
+      });
+
+      const issue = await issuePayload.issue;
+      if (!issue) {
+        return {
+          success: false,
+          error: 'Failed to create issue: no issue returned',
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          id: issue.id,
+          identifier: issue.identifier,
+          title: issue.title,
+          url: issue.url,
+        },
+      };
+    } catch (err) {
+      return {
+        success: false,
+        error: `Failed to create issue: ${err instanceof Error ? err.message : 'Unknown error'}`,
+      };
+    }
+  }
+
+  async addComment(issueId: string, body: string): Promise<Result<void>> {
+    try {
+      const issue = await this.client.issue(issueId);
+      await this.client.createComment({
+        issueId: issue.id,
+        body,
+      });
+
+      return { success: true, data: undefined };
+    } catch (err) {
+      return {
+        success: false,
+        error: `Failed to add comment: ${err instanceof Error ? err.message : 'Unknown error'}`,
+      };
+    }
+  }
+
+  async updateIssueState(issueId: string, stateName: string): Promise<Result<void>> {
+    try {
+      const issue = await this.client.issue(issueId);
+      const team = await issue.team;
+
+      if (!team) {
+        return {
+          success: false,
+          error: 'Could not determine team for issue',
+        };
+      }
+
+      const stateIdResult = await this.getStateIdByName(team.id, stateName);
+      if (!stateIdResult.success) {
+        return stateIdResult;
+      }
+
+      await issue.update({ stateId: stateIdResult.data });
+
+      return { success: true, data: undefined };
+    } catch (err) {
+      return {
+        success: false,
+        error: `Failed to update issue state: ${err instanceof Error ? err.message : 'Unknown error'}`,
+      };
+    }
+  }
+
   // ============ Private Helper Methods ============
 
   private async getLabelIdByName(labelName: string): Promise<Result<string>> {
@@ -339,6 +453,33 @@ export class LinearTicketService implements TicketService {
       return {
         success: false,
         error: `Failed to fetch label: ${err instanceof Error ? err.message : 'Unknown error'}`,
+      };
+    }
+  }
+
+  private async getStateIdByName(teamId: string, stateName: string): Promise<Result<string>> {
+    try {
+      const team = await this.client.team(teamId);
+      const statesConnection = await team.states();
+
+      // Case-insensitive search for the state
+      const state = statesConnection.nodes.find(
+        (s) => s.name.toLowerCase() === stateName.toLowerCase()
+      );
+
+      if (!state) {
+        const availableStates = statesConnection.nodes.map((s) => s.name).join(', ');
+        return {
+          success: false,
+          error: `State "${stateName}" not found. Available states: ${availableStates}`,
+        };
+      }
+
+      return { success: true, data: state.id };
+    } catch (err) {
+      return {
+        success: false,
+        error: `Failed to fetch state: ${err instanceof Error ? err.message : 'Unknown error'}`,
       };
     }
   }

@@ -5,6 +5,8 @@ import type {
   JiraProviderConfig,
 } from '../../../types/config.js';
 import type {
+  CreateIssueOptions,
+  CreatedIssue,
   FetchIssuesByLabelOptions,
   NormalizedIssue,
   NormalizedLabel,
@@ -344,6 +346,27 @@ export class JiraTicketService implements TicketService {
         error: `Failed to swap labels: ${err instanceof Error ? err.message : 'Unknown error'}`,
       };
     }
+  }
+
+  async createIssue(_options: CreateIssueOptions): Promise<Result<CreatedIssue>> {
+    return {
+      success: false,
+      error: 'Creating issues in Jira is not implemented yet',
+    };
+  }
+
+  async addComment(_issueId: string, _body: string): Promise<Result<void>> {
+    return {
+      success: false,
+      error: 'Adding comments in Jira is not implemented yet',
+    };
+  }
+
+  async updateIssueState(_issueId: string, _stateName: string): Promise<Result<void>> {
+    return {
+      success: false,
+      error: 'Updating issue state in Jira is not implemented yet',
+    };
   }
 
   // ============ Private Helper Methods ============

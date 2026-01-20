@@ -9,9 +9,13 @@
     "test:watch": "turbo test -- --watch",
     "typecheck": "turbo typecheck",
     "lint": "turbo lint",
-    "clean": "turbo clean && rm -rf node_modules"
+    "clean": "turbo clean && rm -rf node_modules",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "turbo build && changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.29.8",
     "turbo": "^2.3.0",
     "typescript": "^5.7.0"
   },
