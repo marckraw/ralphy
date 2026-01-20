@@ -1,5 +1,5 @@
 {
-  "name": "@ralphy/cli",
+  "name": "@mrck-labs/ralphy",
   "version": "1.0.0",
   "description": "CLI tool implementing the Ralph Wiggum technique for AI-assisted development",
   "type": "module",
@@ -14,7 +14,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "build:binary": "bun build ./src/index.ts --compile --outfile=dist-binaries/ralphy",
+    "build:binary:all": "bun run build:binary:darwin-arm64 && bun run build:binary:darwin-x64 && bun run build:binary:linux-x64 && bun run build:binary:windows-x64",
+    "build:binary:darwin-arm64": "bun build ./src/index.ts --compile --target=bun-darwin-arm64 --outfile=dist-binaries/ralphy-darwin-arm64",
+    "build:binary:darwin-x64": "bun build ./src/index.ts --compile --target=bun-darwin-x64 --outfile=dist-binaries/ralphy-darwin-x64",
+    "build:binary:linux-x64": "bun build ./src/index.ts --compile --target=bun-linux-x64 --outfile=dist-binaries/ralphy-linux-x64",
+    "build:binary:windows-x64": "bun build ./src/index.ts --compile --target=bun-windows-x64 --outfile=dist-binaries/ralphy-windows-x64.exe"
   },
   "keywords": [
     "cli",
@@ -25,8 +31,24 @@
     "automation"
   ],
   "license": "ISC",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marckraw/ralphy.git",
+    "directory": "apps/cli"
+  },
+  "homepage": "https://github.com/marckraw/ralphy#readme",
+  "bugs": {
+    "url": "https://github.com/marckraw/ralphy/issues"
+  },
   "dependencies": {
-    "@ralphy/shared": "workspace:*",
+    "@mrck-labs/ralphy-shared": "workspace:*",
     "@linear/sdk": "^70.0.0",
     "chalk": "^5.4.1",
     "commander": "^14.0.0",

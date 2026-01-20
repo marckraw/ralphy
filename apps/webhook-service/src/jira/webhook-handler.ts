@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Config } from '../config.js';
-import { logger } from '@ralphy/shared';
+import { logger } from '@mrck-labs/ralphy-shared';
 
 // Jira webhook payload schema (simplified)
 const JiraWebhookSchema = z.object({

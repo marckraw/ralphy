@@ -1,7 +1,7 @@
 ---
-"@mrck-labs/ralphy": minor
 "@mrck-labs/ralphy-webhook": minor
 "@mrck-labs/ralphy-shared": minor
+"@mrck-labs/ralphy": minor
 ---
 
-ralphy run and other commands
+initial commit

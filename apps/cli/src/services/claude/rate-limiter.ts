@@ -2,7 +2,7 @@
  * Rate limit detection and waiting functionality.
  */
 
-import { logger } from '@ralphy/shared';
+import { logger } from '@mrck-labs/ralphy-shared';
 
 export const DEFAULT_RATE_LIMIT_WAIT_MS = 5 * 60 * 1000;
 

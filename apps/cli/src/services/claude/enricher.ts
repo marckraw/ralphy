@@ -2,8 +2,8 @@
  * Pure functions for enriching issues with AI-generated content.
  */
 
-import type { NormalizedIssue } from '@ralphy/shared';
-import { NORMALIZED_PRIORITY_LABELS } from '@ralphy/shared';
+import type { NormalizedIssue } from '@mrck-labs/ralphy-shared';
+import { NORMALIZED_PRIORITY_LABELS } from '@mrck-labs/ralphy-shared';
 
 /**
  * Enriched issue structure.

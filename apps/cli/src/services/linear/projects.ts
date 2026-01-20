@@ -1,5 +1,5 @@
 import { getClient } from './client.js';
-import type { NormalizedTeam, NormalizedProject, Result } from '@ralphy/shared';
+import type { NormalizedTeam, NormalizedProject, Result } from '@mrck-labs/ralphy-shared';
 
 export async function fetchTeams(): Promise<Result<NormalizedTeam[]>> {
   try {

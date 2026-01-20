@@ -22,8 +22,8 @@ COPY apps/webhook-service ./apps/webhook-service
 COPY tsconfig.json ./
 
 # Build
-RUN pnpm --filter @ralphy/shared build
-RUN pnpm --filter @ralphy/webhook-service build
+RUN pnpm --filter @mrck-labs/ralphy-shared build
+RUN pnpm --filter @mrck-labs/ralphy-webhook build
 
 WORKDIR /app/apps/webhook-service
 

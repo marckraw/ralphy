@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Config } from '../config.js';
 import { handleJiraWebhook } from '../jira/webhook-handler.js';
-import { logger } from '@ralphy/shared';
+import { logger } from '@mrck-labs/ralphy-shared';
 
 export function createRoutes(config: Config): Router {
   const router = Router();

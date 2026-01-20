@@ -6,7 +6,7 @@ import {
   normalizeConfig,
   createDefaultConfig,
   type Result,
-} from '@ralphy/shared';
+} from '@mrck-labs/ralphy-shared';
 import {
   getConfigPath,
   configExists,

@@ -16,7 +16,7 @@ import {
   type NormalizedIssue,
   type TicketService,
   type RalphyConfigV2,
-} from '@ralphy/shared';
+} from '@mrck-labs/ralphy-shared';
 import { getContextDir, getHistoryDir, ensureDir } from '../services/config/paths.js';
 import { executeClaude, isClaudeAvailable } from '../services/claude/executor.js';
 import { analyzeOutput } from '../services/claude/completion.js';

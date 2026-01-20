@@ -23,7 +23,7 @@ importers:
       '@linear/sdk':
         specifier: ^70.0.0
         version: 70.0.0(graphql@16.12.0)
-      '@ralphy/shared':
+      '@mrck-labs/ralphy-shared':
         specifier: workspace:*
         version: link:../../packages/shared
       chalk:
@@ -66,12 +66,12 @@ importers:
 
   apps/webhook-service:
     dependencies:
+      '@mrck-labs/ralphy-shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@octokit/rest':
         specifier: ^20.0.0
         version: 20.1.2
-      '@ralphy/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       bullmq:
         specifier: ^5.0.0
         version: 5.66.5

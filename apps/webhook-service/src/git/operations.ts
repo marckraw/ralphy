@@ -4,7 +4,7 @@
 
 import { simpleGit, type SimpleGit } from 'simple-git';
 import type { RepoConfig } from '../config.js';
-import { logger } from '@ralphy/shared';
+import { logger } from '@mrck-labs/ralphy-shared';
 
 export async function getGitClient(repoConfig: RepoConfig): Promise<SimpleGit> {
   const git = simpleGit(repoConfig.localPath);

@@ -7,7 +7,7 @@
 import express from 'express';
 import { loadConfig } from './config.js';
 import { createRoutes } from './server/routes.js';
-import { logger } from '@ralphy/shared';
+import { logger } from '@mrck-labs/ralphy-shared';
 
 async function main(): Promise<void> {
   logger.info('Starting Ralphy Webhook Service...');

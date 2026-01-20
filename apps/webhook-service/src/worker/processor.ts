@@ -4,7 +4,7 @@
  */
 
 import type { RepoConfig } from '../config.js';
-import { logger } from '@ralphy/shared';
+import { logger } from '@mrck-labs/ralphy-shared';
 
 export interface JobData {
   issueKey: string;

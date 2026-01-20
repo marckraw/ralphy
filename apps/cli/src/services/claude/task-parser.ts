@@ -2,8 +2,8 @@
  * Pure functions for parsing markdown into tasks using Claude.
  */
 
-import type { ParsedTask, Result } from '@ralphy/shared';
-import { parseTasksFromJson } from '@ralphy/shared';
+import type { ParsedTask, Result } from '@mrck-labs/ralphy-shared';
+import { parseTasksFromJson } from '@mrck-labs/ralphy-shared';
 
 /**
  * Markers for parsing task output.

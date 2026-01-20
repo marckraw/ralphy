@@ -3,7 +3,7 @@
  */
 
 import { Octokit } from '@octokit/rest';
-import { logger } from '@ralphy/shared';
+import { logger } from '@mrck-labs/ralphy-shared';
 
 export interface CreatePROptions {
   owner: string;
