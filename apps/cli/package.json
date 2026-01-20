@@ -8,7 +8,7 @@
     "ralphy": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc --build",
+    "build": "tsc",
     "dev": "bun run src/index.ts",
     "start": "bun run dist/index.js",
     "test": "bun test",
