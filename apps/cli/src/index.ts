@@ -8,6 +8,7 @@ import { readyCommand } from './commands/ready.js';
 import { runCommand } from './commands/run.js';
 import { enrichCommand } from './commands/enrich.js';
 import { promoteCommand } from './commands/promote.js';
+import { createCommand } from './commands/create.js';
 import { setLogLevel, debug } from '@ralphy/shared/utils';
 
 // Load environment variables
@@ -73,17 +74,21 @@ program
   });
 
 program
-  .command('run <issue>')
-  .description('Execute the Ralph Wiggum loop for a Linear issue')
+  .command('run [issue]')
+  .description('Execute the Ralph Wiggum loop for Linear issues')
   .option('-m, --max-iterations <number>', 'Maximum iterations before stopping', parseInt)
   .option('--auto-commit', 'Git commit after successful completion')
   .option('--notify', 'Desktop notification on completion')
-  .action(async (issue: string, options: { maxIterations?: number; autoCommit?: boolean; notify?: boolean }) => {
+  .option('--all-ready', 'Process all issues with the ralph-ready label')
+  .option('--dry-run', 'Preview which issues would be processed without running')
+  .action(async (issue: string | undefined, options: { maxIterations?: number; autoCommit?: boolean; notify?: boolean; allReady?: boolean; dryRun?: boolean }) => {
     try {
       await runCommand(issue, {
         maxIterations: options.maxIterations,
         autoCommit: options.autoCommit,
         notify: options.notify,
+        allReady: options.allReady,
+        dryRun: options.dryRun,
       });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
@@ -120,6 +125,27 @@ program
     try {
       await promoteCommand(issue, {
         dryRun: options.dryRun,
+      });
+    } catch (err) {
+      console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
+      process.exit(1);
+    }
+  });
+
+program
+  .command('create <path>')
+  .description('Create Linear issues from a markdown file or folder of markdown files')
+  .option('--multi', 'Extract multiple tasks from each file (ignored for folders)')
+  .option('--dry-run', 'Preview without creating issues')
+  .option('-v, --verbose', 'Show Claude output')
+  .option('-s, --status <status>', 'Set issue status (e.g., "Backlog", "Todo")')
+  .action(async (inputPath: string, options: { multi?: boolean; dryRun?: boolean; verbose?: boolean; status?: string }) => {
+    try {
+      await createCommand(inputPath, {
+        multi: options.multi,
+        dryRun: options.dryRun,
+        verbose: options.verbose,
+        status: options.status,
       });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');

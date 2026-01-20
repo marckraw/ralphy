@@ -31,7 +31,7 @@ export function debug(message: string, ...args: unknown[]): void {
 
 export function info(message: string, ...args: unknown[]): void {
   if (shouldLog('info')) {
-    console.log(chalk.blue(message), ...args);
+    console.log(message, ...args);
   }
 }
 
@@ -54,7 +54,7 @@ export function error(message: string, ...args: unknown[]): void {
 }
 
 export function highlight(text: string): string {
-  return chalk.cyan(text);
+  return chalk.yellowBright(text);
 }
 
 export function dim(text: string): string {
@@ -66,7 +66,7 @@ export function bold(text: string): string {
 }
 
 export function formatCommand(command: string): string {
-  return chalk.cyan.bold(command);
+  return chalk.cyanBright.bold(command);
 }
 
 export function formatPath(path: string): string {

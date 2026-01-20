@@ -1,11 +1,22 @@
 /**
- * ralphy run - Execute the Ralph Wiggum loop for an issue.
+ * ralphy run - Execute the Ralph Wiggum loop for issues.
+ *
+ * The Ralph Wiggum technique: an infinite loop that repeatedly feeds
+ * the same prompt to an AI coding agent. Progress persists in files
+ * and git history, not in the LLM's context window.
  */
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { loadConfigV2 } from '../services/config/manager.js';
-import { createTicketService, logger, type NormalizedIssue } from '@ralphy/shared';
+import {
+  createTicketService,
+  logger,
+  isLinearProvider,
+  type NormalizedIssue,
+  type TicketService,
+  type RalphyConfigV2,
+} from '@ralphy/shared';
 import { getContextDir, getHistoryDir, ensureDir } from '../services/config/paths.js';
 import { executeClaude, isClaudeAvailable } from '../services/claude/executor.js';
 import { analyzeOutput } from '../services/claude/completion.js';
@@ -21,6 +32,8 @@ export interface RunOptions {
   maxIterations?: number | undefined;
   autoCommit?: boolean | undefined;
   notify?: boolean | undefined;
+  allReady?: boolean | undefined;
+  dryRun?: boolean | undefined;
 }
 
 /**
@@ -32,6 +45,7 @@ export type RunStatus = 'completed' | 'max_iterations' | 'error';
  * Result of a run execution.
  */
 export interface RunResult {
+  issue: NormalizedIssue;
   status: RunStatus;
   iterations: number;
   totalDurationMs: number;
@@ -49,6 +63,32 @@ interface HistoryEntry {
   iterations: number;
   totalDurationMs: number;
   error?: string | undefined;
+}
+
+/**
+ * States that indicate an issue should be skipped (already done or in review).
+ */
+const SKIP_STATE_TYPES = ['completed', 'canceled'];
+const SKIP_STATE_NAMES = ['done', 'in review', 'review', 'cancelled', 'canceled'];
+
+/**
+ * Checks if an issue should be skipped based on its state.
+ */
+function shouldSkipIssue(issue: NormalizedIssue): boolean {
+  const stateType = issue.state.type.toLowerCase();
+  const stateName = issue.state.name.toLowerCase();
+
+  if (SKIP_STATE_TYPES.includes(stateType)) {
+    return true;
+  }
+
+  for (const skipName of SKIP_STATE_NAMES) {
+    if (stateName.includes(skipName)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -85,9 +125,9 @@ async function saveHistory(
 }
 
 /**
- * Executes git commit if auto-commit is enabled.
+ * Executes git commit for completed work.
  */
-async function autoCommit(identifier: string): Promise<void> {
+async function gitCommit(identifier: string, title: string): Promise<boolean> {
   const { execa } = await import('execa');
 
   try {
@@ -98,72 +138,114 @@ async function autoCommit(identifier: string): Promise<void> {
 
     if (!statusResult.stdout.trim()) {
       logger.info('No changes to commit.');
-      return;
+      return false;
     }
 
     // Stage all changes
     await execa('git', ['add', '-A']);
 
     // Commit with message
-    const message = `feat(${identifier}): Automated changes by Ralphy\n\nTask completed via ralphy run command.`;
+    const message = `feat(${identifier}): ${title}\n\nAutomated changes by Ralphy (Ralph Wiggum loop).`;
     await execa('git', ['commit', '-m', message]);
 
     logger.success(`Changes committed for ${identifier}`);
+    return true;
   } catch (err) {
-    logger.warn(`Failed to auto-commit: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    logger.warn(`Failed to commit: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    return false;
   }
 }
 
 /**
- * Main run command implementation.
- *
- * @param issueIdentifier - The issue identifier (e.g., PROJ-42)
- * @param options - Run options
+ * Formats a duration in milliseconds to a human-readable string.
  */
-export async function runCommand(
-  issueIdentifier: string,
-  options: RunOptions = {}
-): Promise<void> {
-  const { autoCommit: shouldAutoCommit = false, notify: shouldNotify = false } = options;
+function formatDuration(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
 
-  // Load config (v2 normalized)
-  const configResult = await loadConfigV2();
-  if (!configResult.success) {
-    logger.error(configResult.error);
-    process.exit(1);
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  }
+  return `${seconds}s`;
+}
+
+/**
+ * Builds the start comment for Linear.
+ */
+function buildStartComment(maxIterations: number): string {
+  const timestamp = new Date().toISOString();
+  return `## Ralphy Starting Work
+
+**Started at:** ${timestamp}
+**Max iterations:** ${maxIterations}
+
+The Ralph Wiggum loop is now processing this issue. Progress will be tracked in git history and reported back here upon completion.
+
+---
+_Automated by [Ralphy CLI](https://github.com/ralphy)_`;
+}
+
+/**
+ * Builds the completion comment for Linear.
+ */
+function buildCompletionComment(result: RunResult): string {
+  const timestamp = new Date().toISOString();
+  const statusEmoji = result.status === 'completed' ? '✅' : result.status === 'max_iterations' ? '⚠️' : '❌';
+  const statusText = result.status === 'completed'
+    ? 'Completed successfully'
+    : result.status === 'max_iterations'
+      ? 'Stopped at max iterations (may need manual review)'
+      : `Failed: ${result.error ?? 'Unknown error'}`;
+
+  return `## Ralphy Work ${result.status === 'completed' ? 'Completed' : 'Stopped'}
+
+${statusEmoji} **Status:** ${statusText}
+**Iterations:** ${result.iterations}
+**Duration:** ${formatDuration(result.totalDurationMs)}
+**Finished at:** ${timestamp}
+
+${result.status === 'completed'
+  ? 'Changes have been committed to git. Please review and merge.'
+  : result.status === 'max_iterations'
+    ? 'The task may not be fully complete. Please review the current state and re-run if needed.'
+    : 'Please check the error and retry.'}
+
+---
+_Automated by [Ralphy CLI](https://github.com/ralphy)_`;
+}
+
+/**
+ * Executes the Ralph Wiggum loop for a single issue.
+ */
+async function runSingleIssue(
+  issue: NormalizedIssue,
+  ticketService: TicketService,
+  config: RalphyConfigV2,
+  maxIterations: number,
+  contextDir: string,
+  historyDir: string,
+  addComments: boolean
+): Promise<RunResult> {
+  logger.info(`\n${'='.repeat(60)}`);
+  logger.info(`Processing: ${issue.identifier} - ${issue.title}`);
+  logger.info(`${'='.repeat(60)}\n`);
+
+  // Add start comment to Linear
+  if (addComments) {
+    const startComment = buildStartComment(maxIterations);
+    const commentResult = await ticketService.addComment(issue.identifier, startComment);
+    if (!commentResult.success) {
+      logger.warn(`Failed to add start comment: ${commentResult.error}`);
+    } else {
+      logger.info('Added start comment to Linear');
+    }
   }
 
-  const config = configResult.data;
-  const maxIterations = options.maxIterations ?? config.claude.maxIterations;
-
-  // Check Claude is available
-  const claudeAvailable = await isClaudeAvailable();
-  if (!claudeAvailable) {
-    logger.error('Claude CLI is not available. Please install it first: https://claude.ai/code');
-    process.exit(1);
-  }
-
-  // Create ticket service based on provider
-  const ticketService = createTicketService(config);
-
-  // Fetch the issue
-  const spinner = createSpinner(`Fetching issue ${issueIdentifier}...`).start();
-  const issueResult = await ticketService.fetchIssueById(issueIdentifier);
-
-  if (!issueResult.success) {
-    spinner.fail('Failed to fetch issue');
-    logger.error(issueResult.error);
-    process.exit(1);
-  }
-
-  const issue = issueResult.data;
-  spinner.succeed(`Found issue: ${issue.identifier} - ${issue.title}`);
-
-  // Prepare context files
-  const contextDir = getContextDir();
-  const historyDir = getHistoryDir();
+  // Prepare progress file
   const progressFilePath = await writeProgressFile(issue, contextDir);
-
   logger.info(`Progress file: ${logger.formatPath(progressFilePath)}`);
   logger.info(`Max iterations: ${logger.formatNumber(maxIterations)}`);
   console.log('');
@@ -179,9 +261,7 @@ export async function runCommand(
 
   while (iteration < maxIterations) {
     iteration++;
-    logger.info(`\n${'='.repeat(60)}`);
-    logger.info(`Iteration ${iteration} of ${maxIterations}`);
-    logger.info(`${'='.repeat(60)}\n`);
+    logger.info(`\n--- Iteration ${iteration} of ${maxIterations} ---\n`);
 
     // Build prompt
     const prompt = buildPrompt({
@@ -209,7 +289,6 @@ export async function runCommand(
       timeout: config.claude.timeout,
       onStdout: (data: string) => {
         if (!hasOutput) {
-          // Clear the elapsed time line on first output
           process.stdout.write('\r' + ' '.repeat(40) + '\r');
           hasOutput = true;
         }
@@ -226,7 +305,6 @@ export async function runCommand(
 
     clearInterval(elapsedInterval);
     if (!hasOutput) {
-      // Clear elapsed line if no output was produced
       process.stdout.write('\r' + ' '.repeat(40) + '\r');
     }
 
@@ -256,7 +334,6 @@ export async function runCommand(
     if (analysis.isRateLimited) {
       logger.warn('Rate limit detected.');
       await handleRateLimit(output);
-      // Don't count this iteration
       iteration--;
       continue;
     }
@@ -264,21 +341,24 @@ export async function runCommand(
     // Check for non-zero exit code
     if (exitCode !== 0) {
       logger.warn(`Claude exited with code ${exitCode}`);
-      // Continue to next iteration - Claude might recover
     }
   }
 
   const totalDurationMs = Date.now() - startTime;
 
-  // Log final status
-  console.log('\n');
-  logger.info(`${'='.repeat(60)}`);
-  logger.info('Run Summary');
-  logger.info(`${'='.repeat(60)}`);
-  logger.info(`Issue: ${issue.identifier} - ${issue.title}`);
-  logger.info(`Status: ${status}`);
-  logger.info(`Iterations: ${iteration}`);
-  logger.info(`Total time: ${Math.round(totalDurationMs / 1000)}s`);
+  const result: RunResult = {
+    issue,
+    status,
+    iterations: iteration,
+    totalDurationMs,
+    ...(errorMessage !== undefined && { error: errorMessage }),
+  };
+
+  // Log summary for this issue
+  logger.info(`\nIssue ${issue.identifier} Summary:`);
+  logger.info(`  Status: ${status}`);
+  logger.info(`  Iterations: ${iteration}`);
+  logger.info(`  Duration: ${formatDuration(totalDurationMs)}`);
 
   // Save history
   const historyEntry: HistoryEntry = {
@@ -293,41 +373,282 @@ export async function runCommand(
 
   try {
     await saveHistory(historyDir, historyEntry, fullOutput);
-    logger.info(`History saved to: ${logger.formatPath(path.join(historyDir, issue.identifier))}`);
+    logger.info(`  History: ${logger.formatPath(path.join(historyDir, issue.identifier))}`);
   } catch (err) {
     logger.warn(`Failed to save history: ${err instanceof Error ? err.message : 'Unknown error'}`);
   }
 
-  // Auto-commit if requested and successful
-  if (shouldAutoCommit && status === 'completed') {
-    logger.info('\nAuto-committing changes...');
-    await autoCommit(issue.identifier);
-  }
+  // Git commit the changes
+  logger.info('\nCommitting changes to git...');
+  await gitCommit(issue.identifier, issue.title);
 
-  // Send notification if requested
-  if (shouldNotify) {
-    switch (status) {
-      case 'completed':
-        await notifySuccess(issue.identifier);
-        break;
-      case 'max_iterations':
-        await notifyWarning(issue.identifier, `Stopped after ${maxIterations} iterations`);
-        break;
-      case 'error':
-        await notifyFailure(issue.identifier, errorMessage);
-        break;
+  // Add completion comment to Linear
+  if (addComments) {
+    const completionComment = buildCompletionComment(result);
+    const commentResult = await ticketService.addComment(issue.identifier, completionComment);
+    if (!commentResult.success) {
+      logger.warn(`Failed to add completion comment: ${commentResult.error}`);
+    } else {
+      logger.info('Added completion comment to Linear');
     }
   }
 
-  // Exit with appropriate code
+  // Move completed issues to "In Review" status
   if (status === 'completed') {
-    logger.success('\nRalphy run completed successfully!');
-    process.exit(0);
-  } else if (status === 'max_iterations') {
-    logger.warn(`\nMax iterations (${maxIterations}) reached. Task may not be complete.`);
-    process.exit(0);
-  } else {
-    logger.error(`\nRalphy run failed: ${errorMessage ?? 'Unknown error'}`);
+    logger.info('Moving issue to "In Review" status...');
+    const stateResult = await ticketService.updateIssueState(issue.identifier, 'In Review');
+    if (!stateResult.success) {
+      logger.warn(`Failed to update issue state: ${stateResult.error}`);
+    } else {
+      logger.info('Issue moved to "In Review"');
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Main run command implementation.
+ *
+ * @param issueIdentifier - The issue identifier (e.g., PROJ-42) or undefined for --all-ready
+ * @param options - Run options
+ */
+export async function runCommand(
+  issueIdentifier: string | undefined,
+  options: RunOptions = {}
+): Promise<void> {
+  const {
+    autoCommit: shouldAutoCommit = false,
+    notify: shouldNotify = false,
+    allReady = false,
+    dryRun = false,
+  } = options;
+
+  // Validate arguments
+  if (!issueIdentifier && !allReady) {
+    logger.error('Please provide an issue identifier or use --all-ready');
     process.exit(1);
+  }
+
+  // Load config (v2 normalized)
+  const configResult = await loadConfigV2();
+  if (!configResult.success) {
+    logger.error(configResult.error);
+    process.exit(1);
+  }
+
+  const config = configResult.data;
+  const maxIterations = options.maxIterations ?? config.claude.maxIterations;
+
+  // Check Claude is available
+  const claudeAvailable = await isClaudeAvailable();
+  if (!claudeAvailable) {
+    logger.error('Claude CLI is not available. Please install it first: https://claude.ai/code');
+    process.exit(1);
+  }
+
+  // Create ticket service based on provider
+  const ticketService = createTicketService(config);
+  const contextDir = getContextDir();
+  const historyDir = getHistoryDir();
+
+  // Determine issues to process
+  let issuesToProcess: NormalizedIssue[] = [];
+
+  if (allReady) {
+    // Fetch all issues with ralph-ready label
+    const spinner = createSpinner('Fetching ready issues...').start();
+
+    const teamId = isLinearProvider(config.provider)
+      ? config.provider.config.teamId
+      : config.provider.config.projectId;
+
+    const projectId = isLinearProvider(config.provider)
+      ? config.provider.config.projectId
+      : undefined;
+
+    const issuesResult = await ticketService.fetchIssuesByLabel({
+      teamId,
+      labelName: config.labels.ready,
+      projectId,
+    });
+
+    if (!issuesResult.success) {
+      spinner.fail('Failed to fetch issues');
+      logger.error(issuesResult.error);
+      process.exit(1);
+    }
+
+    const allIssues = issuesResult.data;
+    spinner.succeed(`Found ${allIssues.length} issue(s) with "${config.labels.ready}" label`);
+
+    // Filter out issues that are already done or in review
+    const skippedIssues = allIssues.filter(shouldSkipIssue);
+    issuesToProcess = allIssues.filter(issue => !shouldSkipIssue(issue));
+
+    if (skippedIssues.length > 0) {
+      logger.info(`\nSkipping ${skippedIssues.length} issue(s) already in Done/Review state:`);
+      for (const issue of skippedIssues) {
+        logger.info(logger.dim(`  - ${issue.identifier}: ${issue.title} (${issue.state.name})`));
+      }
+    }
+
+    if (issuesToProcess.length === 0) {
+      logger.info(`\nNo actionable issues found with the "${logger.highlight(config.labels.ready)}" label.`);
+      logger.info('All issues are already Done or In Review.');
+      return;
+    }
+
+    // Display queue
+    logger.info('\nIssue queue:');
+    for (let i = 0; i < issuesToProcess.length; i++) {
+      const issue = issuesToProcess[i];
+      if (issue) {
+        logger.info(`  ${i + 1}. ${issue.identifier}: ${issue.title}`);
+      }
+    }
+    console.log('');
+  } else if (issueIdentifier) {
+    // Fetch single issue
+    const spinner = createSpinner(`Fetching issue ${issueIdentifier}...`).start();
+    const issueResult = await ticketService.fetchIssueById(issueIdentifier);
+
+    if (!issueResult.success) {
+      spinner.fail('Failed to fetch issue');
+      logger.error(issueResult.error);
+      process.exit(1);
+    }
+
+    issuesToProcess = [issueResult.data];
+    spinner.succeed(`Found issue: ${issueResult.data.identifier} - ${issueResult.data.title}`);
+  }
+
+  // Dry run mode - just show what would be processed
+  if (dryRun) {
+    console.log('');
+    logger.info(logger.dim('[Dry run mode - no changes will be made]'));
+    console.log('');
+    logger.info('='.repeat(60));
+    logger.info('Ralph Wiggum Dry Run Preview');
+    logger.info('='.repeat(60));
+    logger.info(`Issues to process: ${issuesToProcess.length}`);
+    logger.info(`Max iterations per issue: ${maxIterations}`);
+    logger.info(`Auto-commit: ${shouldAutoCommit || allReady ? 'Yes' : 'No'}`);
+    logger.info(`Notifications: ${shouldNotify ? 'Yes' : 'No'}`);
+    logger.info(`Linear comments: ${allReady || shouldAutoCommit ? 'Yes' : 'No'}`);
+    console.log('');
+
+    logger.info('Issue queue:');
+    for (let i = 0; i < issuesToProcess.length; i++) {
+      const issue = issuesToProcess[i];
+      if (!issue) continue;
+
+      console.log('');
+      logger.info(`${i + 1}. ${logger.highlight(issue.identifier)}: ${issue.title}`);
+      logger.info(`   Priority: ${issue.priority}`);
+      logger.info(`   State: ${issue.state.name}`);
+      logger.info(`   Labels: ${issue.labels.map(l => l.name).join(', ') || 'None'}`);
+      if (issue.url) {
+        logger.info(`   URL: ${logger.dim(issue.url)}`);
+      }
+      if (issue.description) {
+        const preview = issue.description.slice(0, 150).replace(/\n/g, ' ');
+        logger.info(`   Description: ${logger.dim(preview + (issue.description.length > 150 ? '...' : ''))}`);
+      }
+    }
+
+    console.log('');
+    logger.info('='.repeat(60));
+    logger.info(`To run: ralphy run ${allReady ? '--all-ready' : issuesToProcess[0]?.identifier ?? ''}`);
+    logger.info('='.repeat(60));
+    return;
+  }
+
+  // Process all issues
+  const results: RunResult[] = [];
+  const batchStartTime = Date.now();
+
+  for (let i = 0; i < issuesToProcess.length; i++) {
+    const issue = issuesToProcess[i];
+    if (!issue) continue;
+
+    if (allReady && issuesToProcess.length > 1) {
+      logger.info(`\n${'#'.repeat(60)}`);
+      logger.info(`# Issue ${i + 1} of ${issuesToProcess.length}`);
+      logger.info(`${'#'.repeat(60)}`);
+    }
+
+    const result = await runSingleIssue(
+      issue,
+      ticketService,
+      config,
+      maxIterations,
+      contextDir,
+      historyDir,
+      allReady || shouldAutoCommit // Add comments in batch mode or when auto-commit is on
+    );
+
+    results.push(result);
+
+    // Send notification if requested
+    if (shouldNotify) {
+      switch (result.status) {
+        case 'completed':
+          await notifySuccess(issue.identifier);
+          break;
+        case 'max_iterations':
+          await notifyWarning(issue.identifier, `Stopped after ${maxIterations} iterations`);
+          break;
+        case 'error':
+          await notifyFailure(issue.identifier, result.error);
+          break;
+      }
+    }
+  }
+
+  // Final batch summary
+  if (allReady && issuesToProcess.length > 1) {
+    const batchDuration = Date.now() - batchStartTime;
+    const completed = results.filter(r => r.status === 'completed').length;
+    const maxIter = results.filter(r => r.status === 'max_iterations').length;
+    const errors = results.filter(r => r.status === 'error').length;
+
+    console.log('\n');
+    logger.info(`${'='.repeat(60)}`);
+    logger.info('Ralph Wiggum Batch Summary');
+    logger.info(`${'='.repeat(60)}`);
+    logger.info(`Total issues processed: ${results.length}`);
+    logger.success(`Completed: ${completed}`);
+    if (maxIter > 0) logger.warn(`Max iterations reached: ${maxIter}`);
+    if (errors > 0) logger.error(`Errors: ${errors}`);
+    logger.info(`Total duration: ${formatDuration(batchDuration)}`);
+    logger.info(`Total iterations: ${results.reduce((sum, r) => sum + r.iterations, 0)}`);
+
+    console.log('\nResults by issue:');
+    for (const result of results) {
+      const emoji = result.status === 'completed' ? '✅' : result.status === 'max_iterations' ? '⚠️' : '❌';
+      logger.info(`  ${emoji} ${result.issue.identifier}: ${result.status} (${result.iterations} iterations, ${formatDuration(result.totalDurationMs)})`);
+    }
+
+    if (errors > 0) {
+      process.exit(1);
+    }
+  } else {
+    // Single issue mode - use original exit behavior
+    const result = results[0];
+    if (!result) {
+      process.exit(1);
+    }
+
+    if (result.status === 'completed') {
+      logger.success('\nRalphy run completed successfully!');
+      process.exit(0);
+    } else if (result.status === 'max_iterations') {
+      logger.warn(`\nMax iterations (${maxIterations}) reached. Task may not be complete.`);
+      process.exit(0);
+    } else {
+      logger.error(`\nRalphy run failed: ${result.error ?? 'Unknown error'}`);
+      process.exit(1);
+    }
   }
 }
