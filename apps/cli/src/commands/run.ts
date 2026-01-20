@@ -19,6 +19,7 @@ import {
 } from '@mrck-labs/ralphy-shared';
 import { getContextDir, getHistoryDir, ensureDir } from '../services/config/paths.js';
 import { executeClaude, isClaudeAvailable } from '../services/claude/executor.js';
+import { formatToolActivity, formatStats, type ExecutionStats } from '../services/claude/stream-parser.js';
 import { analyzeOutput } from '../services/claude/completion.js';
 import { buildPrompt, buildInitialProgressContent } from '../services/claude/prompt-builder.js';
 import { handleRateLimit } from '../services/claude/rate-limiter.js';
@@ -85,6 +86,7 @@ export interface RunOptions {
   notify?: boolean | undefined;
   allReady?: boolean | undefined;
   dryRun?: boolean | undefined;
+  verbose?: boolean | undefined;
 }
 
 /**
@@ -303,7 +305,8 @@ async function runSingleIssue(
   maxIterations: number,
   contextDir: string,
   historyDir: string,
-  addComments: boolean
+  addComments: boolean,
+  verbose: boolean
 ): Promise<RunResult> {
   logger.info(`\n${'='.repeat(60)}`);
   logger.info(`Processing: ${issue.identifier} - ${issue.title}`);
@@ -350,20 +353,34 @@ async function runSingleIssue(
     // Execute Claude with elapsed time indicator
     const iterationStartTime = Date.now();
     let hasOutput = false;
+    let iterationStats: ExecutionStats | null = null;
 
-    // Show elapsed time while waiting for Claude
-    const elapsedInterval = setInterval(() => {
+    // Show elapsed time while waiting for Claude (only in non-verbose mode)
+    const elapsedInterval = verbose ? null : setInterval(() => {
       if (!hasOutput) {
         const elapsed = Math.round((Date.now() - iterationStartTime) / 1000);
         process.stdout.write(`\r${logger.dim(`Claude working... ${elapsed}s`)}`);
       }
     }, 1000);
 
+    // In verbose mode, show a thinking indicator initially
+    if (verbose) {
+      console.log(logger.dim('🤖 Claude thinking...'));
+    }
+
     const executeResult = await executeClaude({
       prompt,
       model: config.claude.model,
       timeout: config.claude.timeout,
-      onStdout: (data: string) => {
+      verbose,
+      onToolActivity: verbose ? (activity) => {
+        hasOutput = true;
+        console.log(formatToolActivity(activity));
+      } : undefined,
+      onStats: verbose ? (stats) => {
+        iterationStats = stats;
+      } : undefined,
+      onStdout: verbose ? undefined : (data: string) => {
         if (!hasOutput) {
           process.stdout.write('\r' + ' '.repeat(40) + '\r');
           hasOutput = true;
@@ -371,7 +388,7 @@ async function runSingleIssue(
         process.stdout.write(data);
       },
       onStderr: (data: string) => {
-        if (!hasOutput) {
+        if (!hasOutput && !verbose) {
           process.stdout.write('\r' + ' '.repeat(40) + '\r');
           hasOutput = true;
         }
@@ -379,8 +396,10 @@ async function runSingleIssue(
       },
     });
 
-    clearInterval(elapsedInterval);
-    if (!hasOutput) {
+    if (elapsedInterval) {
+      clearInterval(elapsedInterval);
+    }
+    if (!hasOutput && !verbose) {
       process.stdout.write('\r' + ' '.repeat(40) + '\r');
     }
 
@@ -394,7 +413,13 @@ async function runSingleIssue(
     const { output, exitCode, durationMs } = executeResult.data;
     fullOutput += `\n\n--- Iteration ${iteration} ---\n${output}`;
 
-    logger.info(`\nIteration ${iteration} completed in ${Math.round(durationMs / 1000)}s (exit code: ${exitCode})`);
+    // Show iteration completion with stats
+    if (verbose && iterationStats) {
+      const statsStr = formatStats(iterationStats);
+      logger.info(`\n✅ Iteration ${iteration} complete (${statsStr})`);
+    } else {
+      logger.info(`\nIteration ${iteration} completed in ${Math.round(durationMs / 1000)}s (exit code: ${exitCode})`);
+    }
 
     // Analyze output
     const analysis = analyzeOutput(output);
@@ -498,6 +523,7 @@ export async function runCommand(
     notify: shouldNotify = false,
     allReady = false,
     dryRun = false,
+    verbose: isVerbose = false,
   } = options;
 
   // Validate arguments
@@ -674,7 +700,8 @@ export async function runCommand(
       maxIterations,
       contextDir,
       historyDir,
-      allReady || shouldAutoCommit // Add comments in batch mode or when auto-commit is on
+      allReady || shouldAutoCommit, // Add comments in batch mode or when auto-commit is on
+      isVerbose
     );
 
     results.push(result);

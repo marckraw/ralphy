@@ -61,9 +61,14 @@ src/
 - Functions/Variables: camelCase (e.g., `parseIssue`)
 - Constants: SCREAMING_SNAKE_CASE for true constants
 
+## Runtime
+
+- **Always use `bun`** - this project uses bun as its runtime and package manager
+- Never use `npm` or `node` directly
+
 ## Commands
 
-- `npm run dev` - Run CLI in development mode
-- `npm run build` - Compile TypeScript
-- `npm run test` - Run tests
-- `npm run typecheck` - Type check without emitting
+- `bun run dev` - Run CLI in development mode
+- `bun run build` - Compile TypeScript
+- `bun run test` - Run tests
+- `bun run typecheck` - Type check without emitting

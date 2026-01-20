@@ -9,6 +9,7 @@ import { runCommand } from './commands/run.js';
 import { enrichCommand } from './commands/enrich.js';
 import { promoteCommand } from './commands/promote.js';
 import { createCommand } from './commands/create.js';
+import { statusCommand } from './commands/status.js';
 import { setLogLevel, debug } from '@mrck-labs/ralphy-shared/utils';
 
 // Load environment variables
@@ -81,7 +82,8 @@ program
   .option('--notify', 'Desktop notification on completion')
   .option('--all-ready', 'Process all issues with the ralph-ready label')
   .option('--dry-run', 'Preview which issues would be processed without running')
-  .action(async (issue: string | undefined, options: { maxIterations?: number; autoCommit?: boolean; notify?: boolean; allReady?: boolean; dryRun?: boolean }) => {
+  .option('--verbose', 'Show Claude tool activity in real-time')
+  .action(async (issue: string | undefined, options: { maxIterations?: number; autoCommit?: boolean; notify?: boolean; allReady?: boolean; dryRun?: boolean; verbose?: boolean }) => {
     try {
       await runCommand(issue, {
         maxIterations: options.maxIterations,
@@ -89,6 +91,7 @@ program
         notify: options.notify,
         allReady: options.allReady,
         dryRun: options.dryRun,
+        verbose: options.verbose,
       });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
@@ -147,6 +150,19 @@ program
         verbose: options.verbose,
         status: options.status,
       });
+    } catch (err) {
+      console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
+      process.exit(1);
+    }
+  });
+
+program
+  .command('status')
+  .description('Display comprehensive status information about the Ralphy environment')
+  .option('--json', 'Output as JSON')
+  .action(async (options: { json?: boolean }) => {
+    try {
+      await statusCommand({ json: options.json });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
       process.exit(1);
