@@ -1,8 +1,21 @@
 {
   "name": "@mrck-labs/ralphy-shared",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
+  "license": "ISC",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "description": "Shared utilities and types for Ralphy CLI",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marckraw/ralphy.git",
+    "directory": "packages/shared"
+  },
+  "files": [
+    "dist/**/*"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
