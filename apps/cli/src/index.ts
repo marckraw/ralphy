@@ -82,7 +82,8 @@ program
   .option('--notify', 'Desktop notification on completion')
   .option('--all-ready', 'Process all issues with the ralph-ready label')
   .option('--dry-run', 'Preview which issues would be processed without running')
-  .action(async (issue: string | undefined, options: { maxIterations?: number; autoCommit?: boolean; notify?: boolean; allReady?: boolean; dryRun?: boolean }) => {
+  .option('--verbose', 'Show Claude tool activity in real-time')
+  .action(async (issue: string | undefined, options: { maxIterations?: number; autoCommit?: boolean; notify?: boolean; allReady?: boolean; dryRun?: boolean; verbose?: boolean }) => {
     try {
       await runCommand(issue, {
         maxIterations: options.maxIterations,
@@ -90,6 +91,7 @@ program
         notify: options.notify,
         allReady: options.allReady,
         dryRun: options.dryRun,
+        verbose: options.verbose,
       });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
