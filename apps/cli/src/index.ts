@@ -52,9 +52,10 @@ program
   .command('candidates')
   .description('List issues with the "ralph-candidate" label')
   .option('--json', 'Output as JSON')
-  .action(async (options: { json?: boolean }) => {
+  .option('--all', 'Show all issues including completed/in-review')
+  .action(async (options: { json?: boolean; all?: boolean }) => {
     try {
-      await candidatesCommand({ json: options.json });
+      await candidatesCommand({ json: options.json, all: options.all });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
       process.exit(1);
@@ -65,9 +66,10 @@ program
   .command('ready')
   .description('List issues with the "ralph-ready" label')
   .option('--json', 'Output as JSON')
-  .action(async (options: { json?: boolean }) => {
+  .option('--all', 'Show all issues including completed/in-review')
+  .action(async (options: { json?: boolean; all?: boolean }) => {
     try {
-      await readyCommand({ json: options.json });
+      await readyCommand({ json: options.json, all: options.all });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
       process.exit(1);
@@ -100,15 +102,15 @@ program
   });
 
 program
-  .command('enrich [issue]')
-  .description('Enrich Linear issues with AI-generated implementation details')
+  .command('enrich [issues...]')
+  .description('Enrich one or more Linear issues with AI-generated implementation details')
   .option('--all-candidates', 'Enrich all issues with the ralph-candidate label')
   .option('--dry-run', 'Preview enrichment without updating Linear')
   .option('-v, --verbose', 'Show Claude output in real-time')
   .option('-f, --force', 'Re-enrich issues that already have the ralph-enriched label')
-  .action(async (issue: string | undefined, options: { allCandidates?: boolean; dryRun?: boolean; verbose?: boolean; force?: boolean }) => {
+  .action(async (issues: string[], options: { allCandidates?: boolean; dryRun?: boolean; verbose?: boolean; force?: boolean }) => {
     try {
-      await enrichCommand(issue, {
+      await enrichCommand(issues, {
         allCandidates: options.allCandidates,
         dryRun: options.dryRun,
         verbose: options.verbose,
@@ -121,12 +123,12 @@ program
   });
 
 program
-  .command('promote <issue>')
-  .description('Promote an issue from ralph-candidate to ralph-ready')
+  .command('promote <issues...>')
+  .description('Promote one or more issues from ralph-candidate to ralph-ready')
   .option('--dry-run', 'Preview label changes without updating Linear')
-  .action(async (issue: string, options: { dryRun?: boolean }) => {
+  .action(async (issues: string[], options: { dryRun?: boolean }) => {
     try {
-      await promoteCommand(issue, {
+      await promoteCommand(issues, {
         dryRun: options.dryRun,
       });
     } catch (err) {

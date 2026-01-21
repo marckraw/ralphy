@@ -270,18 +270,18 @@ async function enrichSingleIssue(
 /**
  * Main enrich command implementation.
  *
- * @param issueIdentifier - The issue identifier (e.g., PROJ-42) or undefined for --all-candidates
+ * @param issueIdentifiers - The issue identifiers (e.g., ['PROJ-42', 'PROJ-43']) or empty array for --all-candidates
  * @param options - Enrich options
  */
 export async function enrichCommand(
-  issueIdentifier: string | undefined,
+  issueIdentifiers: string[],
   options: EnrichOptions = {}
 ): Promise<void> {
   const { allCandidates = false, dryRun = false, verbose = false, force = false } = options;
 
   // Validate arguments
-  if (!issueIdentifier && !allCandidates) {
-    logger.error('Please provide an issue identifier or use --all-candidates');
+  if (issueIdentifiers.length === 0 && !allCandidates) {
+    logger.error('Please provide issue identifier(s) or use --all-candidates');
     process.exit(1);
   }
 
@@ -402,42 +402,80 @@ export async function enrichCommand(
     if (failCount > 0) {
       process.exit(1);
     }
-  } else if (issueIdentifier) {
-    // Enrich single issue
-    const spinner = createSpinner(`Fetching issue ${issueIdentifier}...`).start();
-    const issueResult = await ticketService.fetchIssueById(issueIdentifier);
-
-    if (!issueResult.success) {
-      spinner.fail('Failed to fetch issue');
-      logger.error(issueResult.error);
-      process.exit(1);
-    }
-
-    const issue = issueResult.data;
-    spinner.succeed(`Found issue: ${issue.identifier} - ${issue.title}`);
-
+  } else if (issueIdentifiers.length > 0) {
+    // Enrich specific issues
     const enrichedLabelName = config.labels.enriched;
+    const issuesToProcess: NormalizedIssue[] = [];
+    let skippedCount = 0;
 
-    // Check if already enriched and warn (but still proceed unless --force is required)
-    if (hasLabelByName(issue.labels, enrichedLabelName)) {
-      if (!force) {
-        logger.warn(
-          `Issue ${issue.identifier} is already enriched (has "${enrichedLabelName}" label).`
-        );
-        logger.info('Use --force to re-enrich this issue.');
-        return;
+    // Fetch all specified issues
+    const spinner = createSpinner(`Fetching ${issueIdentifiers.length} issue(s)...`).start();
+
+    for (const issueIdentifier of issueIdentifiers) {
+      const issueResult = await ticketService.fetchIssueById(issueIdentifier);
+
+      if (!issueResult.success) {
+        spinner.fail(`Failed to fetch issue ${issueIdentifier}`);
+        logger.error(issueResult.error);
+        process.exit(1);
       }
-      logger.info(
-        logger.dim(`Issue already enriched - re-enriching due to --force flag`)
-      );
+
+      const issue = issueResult.data;
+
+      // Check if already enriched
+      if (hasLabelByName(issue.labels, enrichedLabelName) && !force) {
+        logger.info(logger.dim(`  Skipping ${issue.identifier}: already enriched`));
+        skippedCount++;
+      } else {
+        issuesToProcess.push(issue);
+      }
     }
 
-    const success = await enrichSingleIssue(issue, ticketService, dryRun, verbose, enrichedLabelName, config.claude.model, config.claude.timeout);
+    spinner.succeed(`Found ${issueIdentifiers.length} issue(s)`);
 
-    if (!success) {
+    if (skippedCount > 0 && !force) {
+      logger.info(`\nSkipping ${skippedCount} already-enriched issue(s) (use --force to re-enrich)`);
+    }
+
+    if (issuesToProcess.length === 0) {
+      logger.info(`\nNo issues to process.`);
+      return;
+    }
+
+    // Process each issue
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const issue of issuesToProcess) {
+      const success = await enrichSingleIssue(issue, ticketService, dryRun, verbose, enrichedLabelName, config.claude.model, config.claude.timeout);
+      if (success) {
+        successCount++;
+      } else {
+        failCount++;
+      }
+    }
+
+    // Show summary if multiple issues were specified
+    if (issueIdentifiers.length > 1) {
+      console.log('');
+      logger.info('='.repeat(60));
+      logger.info('Enrichment Summary');
+      logger.info('='.repeat(60));
+      logger.info(`Total issues: ${issueIdentifiers.length}`);
+      if (skippedCount > 0) {
+        logger.info(logger.dim(`Skipped (already enriched): ${skippedCount}`));
+      }
+      logger.info(`Processed: ${issuesToProcess.length}`);
+      logger.success(`Successful: ${successCount}`);
+      if (failCount > 0) {
+        logger.error(`Failed: ${failCount}`);
+      }
+    } else {
+      logger.success('\nEnrichment complete!');
+    }
+
+    if (failCount > 0) {
       process.exit(1);
     }
-
-    logger.success('\nEnrichment complete!');
   }
 }

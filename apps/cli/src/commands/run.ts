@@ -13,6 +13,7 @@ import {
   createTicketService,
   logger,
   isLinearProvider,
+  isIssueActionable,
   type NormalizedIssue,
   type TicketService,
   type RalphyConfigV2,
@@ -119,29 +120,11 @@ interface HistoryEntry {
 }
 
 /**
- * States that indicate an issue should be skipped (already done or in review).
- */
-const SKIP_STATE_TYPES = ['completed', 'canceled'];
-const SKIP_STATE_NAMES = ['done', 'in review', 'review', 'cancelled', 'canceled'];
-
-/**
  * Checks if an issue should be skipped based on its state.
+ * Uses the shared isIssueActionable utility - returns true if issue is NOT actionable.
  */
 function shouldSkipIssue(issue: NormalizedIssue): boolean {
-  const stateType = issue.state.type.toLowerCase();
-  const stateName = issue.state.name.toLowerCase();
-
-  if (SKIP_STATE_TYPES.includes(stateType)) {
-    return true;
-  }
-
-  for (const skipName of SKIP_STATE_NAMES) {
-    if (stateName.includes(skipName)) {
-      return true;
-    }
-  }
-
-  return false;
+  return !isIssueActionable(issue);
 }
 
 /**

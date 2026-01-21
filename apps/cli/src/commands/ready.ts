@@ -4,6 +4,7 @@ import {
   logger,
   getPriorityLabel,
   isLinearProvider,
+  filterActionableIssues,
   type NormalizedIssue,
 } from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../utils/spinner.js';
@@ -11,10 +12,11 @@ import { formatIssueTable } from '../utils/table.js';
 
 interface ReadyOptions {
   json?: boolean | undefined;
+  all?: boolean | undefined;
 }
 
 export async function readyCommand(options: ReadyOptions = {}): Promise<void> {
-  const { json = false } = options;
+  const { json = false, all = false } = options;
 
   // Load config (v2 normalized)
   const configResult = await loadConfigV2();
@@ -51,8 +53,17 @@ export async function readyCommand(options: ReadyOptions = {}): Promise<void> {
     process.exit(1);
   }
 
-  const issues = issuesResult.data;
-  spinner.succeed(`Found ${issues.length} ready issue(s)`);
+  const allIssues = issuesResult.data;
+  const issues = all ? allIssues : filterActionableIssues(allIssues);
+  const filteredCount = allIssues.length - issues.length;
+
+  if (all) {
+    spinner.succeed(`Found ${issues.length} ready issue(s)`);
+  } else if (filteredCount > 0) {
+    spinner.succeed(`Found ${issues.length} actionable ready issue(s) (${filteredCount} completed/in-review hidden)`);
+  } else {
+    spinner.succeed(`Found ${issues.length} ready issue(s)`);
+  }
 
   if (issues.length === 0) {
     logger.info(`\nNo issues found with the "${logger.highlight(config.labels.ready)}" label.`);
