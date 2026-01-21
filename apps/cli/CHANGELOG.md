@@ -1,5 +1,11 @@
 # @mrck-labs/ralphy
 
+## 1.4.0
+
+### Minor Changes
+
+- 626fd55: Filter completed/in-review issues from ready and candidates commands by default. Add --all flag to show all issues. Support enriching multiple issues at once with enrich command.
+
 ## 1.3.0
 
 ### Minor Changes
