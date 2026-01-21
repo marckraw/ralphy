@@ -121,12 +121,12 @@ program
   });
 
 program
-  .command('promote <issue>')
-  .description('Promote an issue from ralph-candidate to ralph-ready')
+  .command('promote <issues...>')
+  .description('Promote one or more issues from ralph-candidate to ralph-ready')
   .option('--dry-run', 'Preview label changes without updating Linear')
-  .action(async (issue: string, options: { dryRun?: boolean }) => {
+  .action(async (issues: string[], options: { dryRun?: boolean }) => {
     try {
-      await promoteCommand(issue, {
+      await promoteCommand(issues, {
         dryRun: options.dryRun,
       });
     } catch (err) {
