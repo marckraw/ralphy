@@ -1,5 +1,18 @@
 # @mrck-labs/ralphy
 
+## 1.5.0
+
+### Minor Changes
+
+- 927133e: Add comprehensive README.md documentation for the project, including installation instructions, quick start guide, all CLI commands with examples, configuration options, and development setup.
+- 132d873: Add watch mode for continuous issue monitoring
+
+  - New `ralphy watch` command that continuously monitors for `ralph-ready` issues
+  - Configurable polling interval (default: 120s)
+  - Graceful shutdown with two-press Ctrl+C pattern
+  - API error handling with exponential backoff
+  - Dry-run mode, desktop notifications, and verbose output support
+
 ## 1.4.1
 
 ### Patch Changes
