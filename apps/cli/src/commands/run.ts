@@ -685,7 +685,7 @@ export async function runCommand(
       maxIterations,
       contextDir,
       historyDir,
-      allReady || shouldAutoCommit, // Add comments in batch mode or when auto-commit is on
+      true, // Always add comments to Linear issues
       isVerbose
     );
 
