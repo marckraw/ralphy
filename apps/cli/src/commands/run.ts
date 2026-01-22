@@ -194,8 +194,9 @@ async function gitCommit(identifier: string, title: string): Promise<boolean> {
 
 /**
  * Formats a duration in milliseconds to a human-readable string.
+ * Exported for use by the watch command.
  */
-function formatDuration(ms: number): string {
+export function formatDuration(ms: number): string {
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
@@ -280,8 +281,9 @@ _Automated by [Ralphy CLI](https://github.com/ralphy)_`;
 
 /**
  * Executes the Ralph Wiggum loop for a single issue.
+ * Exported for use by the watch command.
  */
-async function runSingleIssue(
+export async function runSingleIssue(
   issue: NormalizedIssue,
   ticketService: TicketService,
   config: RalphyConfigV2,

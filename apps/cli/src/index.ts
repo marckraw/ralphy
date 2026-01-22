@@ -10,6 +10,7 @@ import { enrichCommand } from './commands/enrich.js';
 import { promoteCommand } from './commands/promote.js';
 import { createCommand } from './commands/create.js';
 import { statusCommand } from './commands/status.js';
+import { watchCommand } from './commands/watch.js';
 import { setLogLevel, debug } from '@mrck-labs/ralphy-shared/utils';
 
 // Load environment variables
@@ -165,6 +166,23 @@ program
   .action(async (options: { json?: boolean }) => {
     try {
       await statusCommand({ json: options.json });
+    } catch (err) {
+      console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
+      process.exit(1);
+    }
+  });
+
+program
+  .command('watch')
+  .description('Continuously watch for and process ralph-ready issues')
+  .option('-i, --interval <seconds>', 'Polling interval in seconds', '120')
+  .option('-m, --max-iterations <number>', 'Max iterations per issue', parseInt)
+  .option('--notify', 'Desktop notification on completion')
+  .option('--verbose', 'Show Claude tool activity')
+  .option('--dry-run', 'Preview mode')
+  .action(async (options: { interval?: string; maxIterations?: number; notify?: boolean; verbose?: boolean; dryRun?: boolean }) => {
+    try {
+      await watchCommand(options);
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
       process.exit(1);
