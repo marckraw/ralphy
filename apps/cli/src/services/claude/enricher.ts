@@ -2,7 +2,7 @@
  * Pure functions for enriching issues with AI-generated content.
  */
 
-import type { NormalizedIssue } from '@mrck-labs/ralphy-shared';
+import type { NormalizedIssue, ProjectContext } from '@mrck-labs/ralphy-shared';
 import { NORMALIZED_PRIORITY_LABELS } from '@mrck-labs/ralphy-shared';
 
 /**
@@ -27,12 +27,52 @@ export const ENRICHMENT_MARKERS = {
 } as const;
 
 /**
+ * Formats project context into markdown for inclusion in the enrichment prompt.
+ */
+function formatProjectContext(projectContext: ProjectContext): string {
+  const lines: string[] = [];
+
+  lines.push(`**Project:** ${projectContext.name}`);
+
+  if (projectContext.description) {
+    lines.push('', `**Project Description:** ${projectContext.description}`);
+  }
+
+  if (projectContext.content) {
+    lines.push('', '### Project Overview', '', projectContext.content);
+  }
+
+  if (projectContext.externalLinks.length > 0) {
+    lines.push('', '### External Links');
+    for (const link of projectContext.externalLinks) {
+      lines.push(`- [${link.label}](${link.url})`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Options for building the enrichment prompt.
+ */
+export interface EnrichmentPromptOptions {
+  codebaseContext?: string | undefined;
+  projectContext?: ProjectContext | undefined;
+}
+
+/**
  * Builds the prompt for enriching an issue.
  */
 export function buildEnrichmentPrompt(
   issue: NormalizedIssue,
-  codebaseContext?: string
+  options?: EnrichmentPromptOptions | string
 ): string {
+  // Support legacy signature where second param was codebaseContext string
+  const opts: EnrichmentPromptOptions =
+    typeof options === 'string' ? { codebaseContext: options } : options ?? {};
+
+  const { codebaseContext, projectContext } = opts;
+
   const lines: string[] = [
     '# Task: Enrich Issue',
     '',
@@ -50,6 +90,10 @@ export function buildEnrichmentPrompt(
     `**Labels:** ${issue.labels.map((l) => l.name).join(', ') || 'None'}`,
     '',
   ];
+
+  if (projectContext) {
+    lines.push('## Project Context', '', formatProjectContext(projectContext), '');
+  }
 
   if (codebaseContext) {
     lines.push('## Codebase Context', '', codebaseContext, '');

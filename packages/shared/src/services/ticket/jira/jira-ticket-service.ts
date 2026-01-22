@@ -12,6 +12,7 @@ import type {
   NormalizedLabel,
   NormalizedProject,
   NormalizedTeam,
+  ProjectContext,
   Result,
   SwapResult,
   TicketService,
@@ -176,6 +177,16 @@ export class JiraTicketService implements TicketService {
         error: `Failed to fetch issue: ${err instanceof Error ? err.message : 'Unknown error'}`,
       };
     }
+  }
+
+  async fetchProjectContext(_projectId: string): Promise<Result<ProjectContext>> {
+    // Jira doesn't have a direct equivalent to Linear's project overview/content
+    // Return a not implemented error for graceful degradation
+    logger.debug('[JiraTicketService] fetchProjectContext: not implemented for Jira');
+    return {
+      success: false,
+      error: 'Project context is not available for Jira provider',
+    };
   }
 
   async updateIssueDescription(

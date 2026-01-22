@@ -9,6 +9,7 @@ import {
   logger,
   isLinearProvider,
   type NormalizedIssue,
+  type ProjectContext,
   type TicketService,
 } from '@mrck-labs/ralphy-shared';
 import { isClaudeAvailable } from '../services/claude/executor.js';
@@ -60,6 +61,7 @@ function filterUnenrichedIssues(
  * @param verbose - If true, stream Claude's output
  * @param enrichedLabelName - The name of the label to add after enrichment
  * @param model - The Claude model to use
+ * @param projectContext - Optional project context for additional enrichment context
  * @returns True if enrichment was successful
  */
 async function enrichSingleIssue(
@@ -69,12 +71,13 @@ async function enrichSingleIssue(
   verbose: boolean,
   enrichedLabelName: string,
   model: string,
-  timeout: number
+  timeout: number,
+  projectContext?: ProjectContext
 ): Promise<boolean> {
   logger.info(`\nEnriching ${logger.highlight(issue.identifier)}: ${issue.title}`);
 
-  // Build the prompt
-  const prompt = buildEnrichmentPrompt(issue);
+  // Build the prompt with project context if available
+  const prompt = buildEnrichmentPrompt(issue, { projectContext });
 
   logger.debug('Prompt length: ' + prompt.length + ' characters');
 
@@ -318,6 +321,30 @@ export async function enrichCommand(
     ? config.provider.config.projectId
     : undefined;
 
+  // Fetch project context if available (for Linear provider)
+  let projectContext: ProjectContext | undefined;
+  if (projectId) {
+    const contextSpinner = createSpinner('Fetching project context...').start();
+    const projectContextResult = await ticketService.fetchProjectContext(projectId);
+
+    if (projectContextResult.success) {
+      projectContext = projectContextResult.data;
+      contextSpinner.succeed('Fetched project context');
+      if (verbose) {
+        logger.info(logger.dim(`  Project: ${projectContext.name}`));
+        if (projectContext.content) {
+          logger.info(logger.dim(`  Overview: ${projectContext.content.slice(0, 100)}...`));
+        }
+        if (projectContext.externalLinks.length > 0) {
+          logger.info(logger.dim(`  External links: ${projectContext.externalLinks.length}`));
+        }
+      }
+    } else {
+      contextSpinner.warn('Project context not available');
+      logger.debug(`Project context fetch failed: ${projectContextResult.error}`);
+    }
+  }
+
   if (allCandidates) {
     // Enrich all candidate issues
     const spinner = createSpinner('Fetching candidate issues...').start();
@@ -376,7 +403,7 @@ export async function enrichCommand(
     let failCount = 0;
 
     for (const issue of issuesToProcess) {
-      const success = await enrichSingleIssue(issue, ticketService, dryRun, verbose, enrichedLabelName, config.claude.model, config.claude.timeout);
+      const success = await enrichSingleIssue(issue, ticketService, dryRun, verbose, enrichedLabelName, config.claude.model, config.claude.timeout, projectContext);
       if (success) {
         successCount++;
       } else {
@@ -447,7 +474,7 @@ export async function enrichCommand(
     let failCount = 0;
 
     for (const issue of issuesToProcess) {
-      const success = await enrichSingleIssue(issue, ticketService, dryRun, verbose, enrichedLabelName, config.claude.model, config.claude.timeout);
+      const success = await enrichSingleIssue(issue, ticketService, dryRun, verbose, enrichedLabelName, config.claude.model, config.claude.timeout, projectContext);
       if (success) {
         successCount++;
       } else {

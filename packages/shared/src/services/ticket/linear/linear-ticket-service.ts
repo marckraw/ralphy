@@ -11,6 +11,7 @@ import type {
   NormalizedLabel,
   NormalizedProject,
   NormalizedTeam,
+  ProjectContext,
   Result,
   SwapResult,
   TicketService,
@@ -180,6 +181,34 @@ export class LinearTicketService implements TicketService {
       return {
         success: false,
         error: `Failed to fetch issue: ${err instanceof Error ? err.message : 'Unknown error'}`,
+      };
+    }
+  }
+
+  async fetchProjectContext(projectId: string): Promise<Result<ProjectContext>> {
+    try {
+      const project = await this.client.project(projectId);
+
+      // Fetch external links from the project
+      const externalLinksConnection = await project.externalLinks();
+      const externalLinks = externalLinksConnection.nodes.map((link) => ({
+        label: link.label,
+        url: link.url,
+      }));
+
+      const projectContext: ProjectContext = {
+        id: project.id,
+        name: project.name,
+        description: project.description ?? undefined,
+        content: project.content ?? undefined,
+        externalLinks,
+      };
+
+      return { success: true, data: projectContext };
+    } catch (err) {
+      return {
+        success: false,
+        error: `Failed to fetch project context: ${err instanceof Error ? err.message : 'Unknown error'}`,
       };
     }
   }

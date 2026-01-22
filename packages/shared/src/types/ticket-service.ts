@@ -34,6 +34,24 @@ export const NormalizedProjectSchema = z.object({
   key: z.string().optional(),
 });
 
+// External link in project overview
+export const ProjectExternalLinkSchema = z.object({
+  label: z.string(),
+  url: z.string(),
+});
+
+// Project context for enrichment - includes overview content and external links
+export const ProjectContextSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  content: z.string().optional(), // Project overview content in markdown
+  externalLinks: z.array(ProjectExternalLinkSchema),
+});
+
+export type ProjectExternalLink = z.infer<typeof ProjectExternalLinkSchema>;
+export type ProjectContext = z.infer<typeof ProjectContextSchema>;
+
 export const NormalizedIssueSchema = z.object({
   id: z.string(),
   identifier: z.string(),
@@ -108,6 +126,14 @@ export interface TicketService {
    * Fetches a single issue by its identifier (e.g., PROJ-42).
    */
   fetchIssueById(issueId: string): Promise<Result<NormalizedIssue>>;
+
+  /**
+   * Fetches project context including overview content and external links.
+   * Used for enriching issues with project-level context.
+   * For Linear: returns project content and external links
+   * For Jira: returns not implemented placeholder (graceful degradation)
+   */
+  fetchProjectContext(projectId: string): Promise<Result<ProjectContext>>;
 
   // ============ Write Operations ============
 
