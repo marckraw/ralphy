@@ -1,6 +1,6 @@
 {
   "name": "@mrck-labs/ralphy",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "CLI tool implementing the Ralph Wiggum technique for AI-assisted development",
   "type": "module",
   "main": "./dist/index.js",
