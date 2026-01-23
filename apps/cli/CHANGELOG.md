@@ -1,5 +1,16 @@
 # @mrck-labs/ralphy
 
+## 1.6.0
+
+### Minor Changes
+
+- 92ea84f: prioritization in run command
+
+### Patch Changes
+
+- Updated dependencies [92ea84f]
+  - @mrck-labs/ralphy-shared@1.3.0
+
 ## 1.5.1
 
 ### Patch Changes
