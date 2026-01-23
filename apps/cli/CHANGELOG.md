@@ -1,5 +1,11 @@
 # @mrck-labs/ralphy
 
+## 1.5.1
+
+### Patch Changes
+
+- 7bde116: Always add comments to Linear issues when running the run command, not just in batch mode or with auto-commit enabled
+
 ## 1.5.0
 
 ### Minor Changes
