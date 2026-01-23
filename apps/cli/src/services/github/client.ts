@@ -1,4 +1,5 @@
 import { Octokit } from '@octokit/rest';
+import { RequestError } from '@octokit/request-error';
 import type { Result } from '@mrck-labs/ralphy-shared';
 
 let octokitInstance: Octokit | null = null;
@@ -81,7 +82,7 @@ export async function validateRepoAccess(
     await client.repos.get({ owner, repo });
     return { success: true, data: true };
   } catch (err) {
-    if (err instanceof Error && 'status' in err && err.status === 404) {
+    if (err instanceof RequestError && err.status === 404) {
       return {
         success: false,
         error: `Repository ${owner}/${repo} not found or not accessible`,
