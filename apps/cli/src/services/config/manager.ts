@@ -4,6 +4,7 @@ import {
   type RalphyConfigV2,
   parseConfig,
   normalizeConfig,
+  parseConfigV2,
   createDefaultConfig,
   type Result,
 } from '@mrck-labs/ralphy-shared';
@@ -178,6 +179,63 @@ export async function updateConfig(
   }
 
   const saveResult = await saveConfig(validateResult.data, cwd);
+  if (!saveResult.success) {
+    return saveResult;
+  }
+
+  return { success: true, data: validateResult.data };
+}
+
+/**
+ * Updates a v2 config with partial updates.
+ * Merges updates deeply, preserving existing nested structures.
+ */
+export async function updateConfigV2(
+  updates: Partial<RalphyConfigV2>,
+  cwd: string = process.cwd()
+): Promise<Result<RalphyConfigV2>> {
+  const loadResult = await loadConfigV2(cwd);
+  if (!loadResult.success) {
+    return loadResult;
+  }
+
+  const existingConfig = loadResult.data;
+
+  // Deep merge the config, preserving nested structures
+  const updatedConfig: RalphyConfigV2 = {
+    ...existingConfig,
+    ...updates,
+    version: 2, // Always ensure version is 2
+    provider: updates.provider ?? existingConfig.provider,
+    labels: {
+      ...existingConfig.labels,
+      ...(updates.labels ?? {}),
+    },
+    claude: {
+      ...existingConfig.claude,
+      ...(updates.claude ?? {}),
+    },
+    integrations: {
+      ...existingConfig.integrations,
+      ...(updates.integrations ?? {}),
+      // Deep merge github integration to preserve existing fields
+      ...(updates.integrations?.github
+        ? {
+            github: {
+              ...existingConfig.integrations?.github,
+              ...updates.integrations.github,
+            },
+          }
+        : {}),
+    },
+  };
+
+  const validateResult = parseConfigV2(updatedConfig);
+  if (!validateResult.success) {
+    return validateResult;
+  }
+
+  const saveResult = await saveConfigV2(validateResult.data, cwd);
   if (!saveResult.success) {
     return saveResult;
   }

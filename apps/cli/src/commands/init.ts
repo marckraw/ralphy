@@ -1,14 +1,19 @@
 import inquirer from 'inquirer';
 import { initializeClient, validateApiKey } from '../services/linear/client.js';
 import { fetchTeams, fetchProjects } from '../services/linear/projects.js';
-import { isInitialized, saveConfigV2 } from '../services/config/manager.js';
+import { isInitialized, saveConfigV2, loadConfigV2, updateConfigV2 } from '../services/config/manager.js';
 import { createRalphyStructure } from '../services/config/paths.js';
+import {
+  validateGitHubToken,
+  validateRepoAccess,
+} from '../services/github/client.js';
 import {
   logger,
   createLinearConfigV2,
   createJiraConfigV2,
   type NormalizedTeam,
   type NormalizedProject,
+  type RalphyConfigV2,
 } from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../utils/spinner.js';
 import { Version3Client } from 'jira.js';
@@ -22,33 +27,161 @@ interface InitOptions {
 export async function initCommand(options: InitOptions = {}): Promise<void> {
   const { force = false } = options;
 
-  // Check if already initialized
+  // Check existing configuration
   const alreadyInitialized = await isInitialized();
-  if (alreadyInitialized && !force) {
-    logger.warn('Ralphy is already initialized in this directory.');
-    const { confirm } = await inquirer.prompt<{ confirm: boolean }>([
+
+  if (force) {
+    // Force mode: full reconfiguration
+    logger.info('Force mode: reconfiguring from scratch...');
+    await fullInitialization();
+    return;
+  }
+
+  if (!alreadyInitialized) {
+    // First run: full initialization
+    await fullInitialization();
+    return;
+  }
+
+  // Load existing config to check what's configured
+  const configResult = await loadConfigV2();
+  if (!configResult.success) {
+    logger.error(`Failed to load config: ${configResult.error}`);
+    logger.info('Run `ralphy init --force` to reconfigure.');
+    return;
+  }
+
+  const config = configResult.data;
+
+  // Check what's already configured
+  const hasProvider = Boolean(config.provider);
+  const hasGitHub = Boolean(config.integrations?.github);
+
+  if (hasProvider && hasGitHub) {
+    // Everything configured - show status
+    showConfigurationStatus(config);
+    await promptForReconfiguration(config);
+    return;
+  }
+
+  if (hasProvider && !hasGitHub) {
+    // Provider exists but no GitHub - offer to configure GitHub
+    showConfigurationStatus(config);
+    const { addGitHub } = await inquirer.prompt<{ addGitHub: boolean }>([
       {
         type: 'confirm',
-        name: 'confirm',
-        message: 'Do you want to reinitialize? This will overwrite existing configuration.',
-        default: false,
+        name: 'addGitHub',
+        message: 'Do you want to configure GitHub integration for PR review imports?',
+        default: true,
       },
     ]);
 
-    if (!confirm) {
-      logger.info('Initialization cancelled.');
-      return;
+    if (addGitHub) {
+      await configureGitHubIntegration();
     }
+    return;
   }
 
+  // Shouldn't reach here, but fallback to full init
+  await fullInitialization();
+}
+
+/**
+ * Shows the current configuration status.
+ */
+function showConfigurationStatus(config: RalphyConfigV2): void {
+  logger.info('\nCurrent Ralphy Configuration:');
+  logger.info('─'.repeat(40));
+
+  // Provider info
+  const providerType = config.provider.type;
+  const providerName = providerType === 'linear' ? 'Linear' : 'Jira Cloud';
+  logger.info(`Provider: ${logger.highlight(providerName)}`);
+
+  if (providerType === 'linear') {
+    logger.info(`  Project: ${logger.highlight(config.provider.config.projectName)}`);
+  } else {
+    logger.info(`  Project: ${logger.highlight(config.provider.config.projectName)} (${config.provider.config.projectKey})`);
+    logger.info(`  Host: ${logger.dim(config.provider.config.host)}`);
+  }
+
+  // GitHub integration
+  if (config.integrations?.github) {
+    const gh = config.integrations.github;
+    logger.info(`GitHub: ${logger.highlight(`${gh.owner}/${gh.repo}`)}`);
+  } else {
+    logger.info(`GitHub: ${logger.dim('Not configured')}`);
+  }
+
+  // Labels
+  logger.info('\nLabels:');
+  logger.info(`  Ready: ${logger.highlight(config.labels.ready)}`);
+  logger.info(`  Candidate: ${logger.highlight(config.labels.candidate)}`);
+  logger.info(`  Enriched: ${logger.highlight(config.labels.enriched)}`);
+  logger.info(`  PR Feedback: ${logger.highlight(config.labels.prFeedback)}`);
+
+  logger.info('─'.repeat(40));
+}
+
+/**
+ * Prompts for reconfiguration options.
+ */
+async function promptForReconfiguration(_config: RalphyConfigV2): Promise<void> {
+  const { action } = await inquirer.prompt<{ action: string }>([
+    {
+      type: 'list',
+      name: 'action',
+      message: 'What would you like to do?',
+      choices: [
+        { name: 'Keep current configuration', value: 'keep' },
+        { name: 'Reconfigure GitHub integration', value: 'github' },
+        { name: 'Reconfigure everything (--force)', value: 'force' },
+      ],
+    },
+  ]);
+
+  switch (action) {
+    case 'github':
+      await configureGitHubIntegration();
+      break;
+    case 'force':
+      await fullInitialization();
+      break;
+    default:
+      logger.info('Configuration unchanged.');
+  }
+}
+
+/**
+ * Full initialization flow (provider + optionally GitHub).
+ */
+async function fullInitialization(): Promise<void> {
   // Select provider
   const provider = await selectProvider();
 
   if (provider === 'linear') {
-    await initLinear();
+    const result = await initLinear();
+    if (!result) return;
   } else {
-    await initJira();
+    const result = await initJira();
+    if (!result) return;
   }
+
+  // Offer to configure GitHub
+  const { addGitHub } = await inquirer.prompt<{ addGitHub: boolean }>([
+    {
+      type: 'confirm',
+      name: 'addGitHub',
+      message: 'Do you want to configure GitHub integration for PR review imports?',
+      default: false,
+    },
+  ]);
+
+  if (addGitHub) {
+    await configureGitHubIntegration();
+  }
+
+  printNextSteps();
 }
 
 async function selectProvider(): Promise<Provider> {
@@ -67,12 +200,12 @@ async function selectProvider(): Promise<Provider> {
   return provider;
 }
 
-async function initLinear(): Promise<void> {
+async function initLinear(): Promise<RalphyConfigV2 | null> {
   // Get Linear API key
   const apiKey = await getLinearApiKey();
   if (!apiKey) {
     logger.error('Linear API key is required.');
-    return;
+    return null;
   }
 
   // Validate API key
@@ -80,7 +213,7 @@ async function initLinear(): Promise<void> {
   const isValid = await validateApiKey(apiKey);
   if (!isValid) {
     validatingSpinner.fail('Invalid Linear API key');
-    return;
+    return null;
   }
   validatingSpinner.succeed('Linear API key validated');
 
@@ -90,13 +223,13 @@ async function initLinear(): Promise<void> {
   // Fetch and select team
   const team = await selectLinearTeam();
   if (!team) {
-    return;
+    return null;
   }
 
   // Fetch and select project
   const project = await selectLinearProject(team.id);
   if (!project) {
-    return;
+    return null;
   }
 
   // Create directory structure and save config
@@ -108,7 +241,7 @@ async function initLinear(): Promise<void> {
   if (!result.success) {
     structureSpinner.fail('Failed to create configuration');
     logger.error(result.error);
-    return;
+    return null;
   }
   structureSpinner.succeed('Ralphy configuration created');
 
@@ -116,14 +249,15 @@ async function initLinear(): Promise<void> {
   logger.info(`Provider: ${logger.highlight('Linear')}`);
   logger.info(`Project: ${logger.highlight(project.name)}`);
   logger.info(`Team: ${logger.highlight(team.name)}`);
-  printNextSteps();
+
+  return config;
 }
 
-async function initJira(): Promise<void> {
+async function initJira(): Promise<RalphyConfigV2 | null> {
   // Get Jira credentials
   const credentials = await getJiraCredentials();
   if (!credentials) {
-    return;
+    return null;
   }
 
   const { host, email, apiToken } = credentials;
@@ -141,19 +275,19 @@ async function initJira(): Promise<void> {
     const myself = await client.myself.getCurrentUser();
     if (!myself.accountId) {
       validatingSpinner.fail('Invalid Jira credentials');
-      return;
+      return null;
     }
     validatingSpinner.succeed(`Jira credentials validated (${myself.displayName ?? email})`);
   } catch (err) {
     validatingSpinner.fail('Invalid Jira credentials');
     logger.error(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    return;
+    return null;
   }
 
   // Select project
   const project = await selectJiraProject(client);
   if (!project) {
-    return;
+    return null;
   }
 
   // Create directory structure and save config
@@ -172,14 +306,15 @@ async function initJira(): Promise<void> {
   if (!result.success) {
     structureSpinner.fail('Failed to create configuration');
     logger.error(result.error);
-    return;
+    return null;
   }
   structureSpinner.succeed('Ralphy configuration created');
 
   logger.success('\nRalphy initialized successfully!');
   logger.info(`Provider: ${logger.highlight('Jira Cloud')}`);
   logger.info(`Project: ${logger.highlight(project.name)} (${project.key})`);
-  printNextSteps();
+
+  return config;
 }
 
 function printNextSteps(): void {
@@ -188,6 +323,185 @@ function printNextSteps(): void {
   logger.info(`  2. Add the ${logger.highlight('ralph-ready')} label to issues ready for automation`);
   logger.info(`  3. Run ${logger.formatCommand('ralphy candidates')} to see candidate issues`);
   logger.info(`  4. Run ${logger.formatCommand('ralphy ready')} to see ready issues`);
+}
+
+// ============ GitHub Configuration ============
+
+async function configureGitHubIntegration(): Promise<void> {
+  logger.info('\nConfiguring GitHub Integration...');
+
+  // Get token
+  const token = await getGitHubToken();
+  if (!token) {
+    logger.error('GitHub token is required for PR integration.');
+    return;
+  }
+
+  // Validate token
+  const validatingSpinner = createSpinner('Validating GitHub token...').start();
+  const tokenResult = await validateGitHubToken(token);
+  if (!tokenResult.success) {
+    validatingSpinner.fail(tokenResult.error);
+    return;
+  }
+  validatingSpinner.succeed(`GitHub token validated (${tokenResult.data})`);
+
+  // Get repository info
+  const repoInfo = await getRepositoryInfo();
+  if (!repoInfo) {
+    return;
+  }
+
+  // Validate repo access
+  const repoSpinner = createSpinner(`Validating access to ${repoInfo.owner}/${repoInfo.repo}...`).start();
+  const repoResult = await validateRepoAccess(token, repoInfo.owner, repoInfo.repo);
+  if (!repoResult.success) {
+    repoSpinner.fail(repoResult.error);
+    return;
+  }
+  repoSpinner.succeed(`Repository access validated`);
+
+  // Update config
+  const updateSpinner = createSpinner('Updating configuration...').start();
+
+  // Determine if we should store the token (only if not from env)
+  const isFromEnv = Boolean(process.env['GITHUB_TOKEN']);
+  const tokenToStore = isFromEnv ? undefined : token;
+
+  const updateResult = await updateConfigV2({
+    integrations: {
+      github: {
+        token: tokenToStore,
+        owner: repoInfo.owner,
+        repo: repoInfo.repo,
+      },
+    },
+  });
+
+  if (!updateResult.success) {
+    updateSpinner.fail('Failed to update configuration');
+    logger.error(updateResult.error);
+    return;
+  }
+  updateSpinner.succeed('GitHub integration configured');
+
+  logger.success('\nGitHub integration added!');
+  logger.info(`Repository: ${logger.highlight(`${repoInfo.owner}/${repoInfo.repo}`)}`);
+  if (isFromEnv) {
+    logger.info(`Token: ${logger.dim('Using GITHUB_TOKEN environment variable')}`);
+  }
+  logger.info(`\nYou can now use:`);
+  logger.info(`  ${logger.formatCommand('ralphy github prs')} - List PRs with review comments`);
+  logger.info(`  ${logger.formatCommand('ralphy github import <pr>')} - Import PR comments as tasks`);
+}
+
+async function getGitHubToken(): Promise<string | null> {
+  // First check environment variable
+  const envToken = process.env['GITHUB_TOKEN'];
+  if (envToken) {
+    logger.info('Using GitHub token from GITHUB_TOKEN environment variable');
+    return envToken;
+  }
+
+  // Otherwise prompt for it
+  const { token } = await inquirer.prompt<{ token: string }>([
+    {
+      type: 'password',
+      name: 'token',
+      message: 'Enter your GitHub Personal Access Token (needs repo scope):',
+      mask: '*',
+      validate: (input: string) => {
+        if (!input || input.trim().length === 0) {
+          return 'GitHub token is required';
+        }
+        return true;
+      },
+    },
+  ]);
+
+  return token.trim();
+}
+
+interface RepositoryInfo {
+  owner: string;
+  repo: string;
+}
+
+async function getRepositoryInfo(): Promise<RepositoryInfo | null> {
+  // Try to detect from git remote
+  const detectedRepo = await detectGitHubRepo();
+
+  if (detectedRepo) {
+    const { useDetected } = await inquirer.prompt<{ useDetected: boolean }>([
+      {
+        type: 'confirm',
+        name: 'useDetected',
+        message: `Use detected repository ${detectedRepo.owner}/${detectedRepo.repo}?`,
+        default: true,
+      },
+    ]);
+
+    if (useDetected) {
+      return detectedRepo;
+    }
+  }
+
+  // Manual entry
+  const answers = await inquirer.prompt<RepositoryInfo>([
+    {
+      type: 'input',
+      name: 'owner',
+      message: 'Enter the repository owner (user or organization):',
+      validate: (input: string) => {
+        if (!input || input.trim().length === 0) {
+          return 'Repository owner is required';
+        }
+        return true;
+      },
+    },
+    {
+      type: 'input',
+      name: 'repo',
+      message: 'Enter the repository name:',
+      validate: (input: string) => {
+        if (!input || input.trim().length === 0) {
+          return 'Repository name is required';
+        }
+        return true;
+      },
+    },
+  ]);
+
+  return {
+    owner: answers.owner.trim(),
+    repo: answers.repo.trim(),
+  };
+}
+
+async function detectGitHubRepo(): Promise<RepositoryInfo | null> {
+  try {
+    const { execa } = await import('execa');
+    const { stdout } = await execa('git', ['remote', 'get-url', 'origin']);
+    const remoteUrl = stdout.trim();
+
+    // Parse GitHub URL formats:
+    // https://github.com/owner/repo.git
+    // git@github.com:owner/repo.git
+    const httpsMatch = /github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/.exec(remoteUrl);
+    const sshMatch = /github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/.exec(remoteUrl);
+
+    const match = httpsMatch ?? sshMatch;
+    if (match?.[1] && match?.[2]) {
+      return {
+        owner: match[1],
+        repo: match[2],
+      };
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 // ============ Linear Helper Functions ============

@@ -11,6 +11,7 @@ import { promoteCommand } from './commands/promote.js';
 import { createCommand } from './commands/create.js';
 import { statusCommand } from './commands/status.js';
 import { watchCommand } from './commands/watch.js';
+import { prsCommand, importCommand } from './commands/github/index.js';
 import { setLogLevel, debug } from '@mrck-labs/ralphy-shared/utils';
 
 // Load environment variables
@@ -87,8 +88,20 @@ program
   .option('--dry-run', 'Preview which issues would be processed without running')
   .option('--verbose', 'Show Claude tool activity in real-time')
   .option('--fifo', 'Process issues in FIFO order (skip intelligent prioritization)')
-  .action(async (issue: string | undefined, options: { maxIterations?: number; autoCommit?: boolean; notify?: boolean; allReady?: boolean; dryRun?: boolean; verbose?: boolean; fifo?: boolean }) => {
+  .option('-p, --priority <priorities...>', 'Filter by priority (urgent, high, medium, low, none)')
+  .action(async (issue: string | undefined, options: { maxIterations?: number; autoCommit?: boolean; notify?: boolean; allReady?: boolean; dryRun?: boolean; verbose?: boolean; fifo?: boolean; priority?: string[] }) => {
     try {
+      // Validate priority values
+      const validPriorities = ['urgent', 'high', 'medium', 'low', 'none'];
+      const priorityFilter = options.priority?.filter(p => validPriorities.includes(p)) as Array<'urgent' | 'high' | 'medium' | 'low' | 'none'> | undefined;
+
+      if (options.priority && priorityFilter && priorityFilter.length !== options.priority.length) {
+        const invalid = options.priority.filter(p => !validPriorities.includes(p));
+        console.error(`Invalid priority value(s): ${invalid.join(', ')}`);
+        console.error(`Valid values: ${validPriorities.join(', ')}`);
+        process.exit(1);
+      }
+
       await runCommand(issue, {
         maxIterations: options.maxIterations,
         autoCommit: options.autoCommit,
@@ -97,6 +110,7 @@ program
         dryRun: options.dryRun,
         verbose: options.verbose,
         fifo: options.fifo,
+        priority: priorityFilter,
       });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
@@ -188,6 +202,44 @@ program
   .action(async (options: { interval?: string; maxIterations?: number; notify?: boolean; verbose?: boolean; dryRun?: boolean; fifo?: boolean }) => {
     try {
       await watchCommand(options);
+    } catch (err) {
+      console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
+      process.exit(1);
+    }
+  });
+
+// GitHub integration commands
+const github = program
+  .command('github')
+  .description('GitHub integration commands for PR review imports');
+
+github
+  .command('prs')
+  .description('List pull requests with review comments')
+  .option('-s, --state <state>', 'Filter by PR state (open, closed, all)', 'open')
+  .option('--json', 'Output as JSON')
+  .action(async (options: { state?: 'open' | 'closed' | 'all'; json?: boolean }) => {
+    try {
+      await prsCommand({ state: options.state, json: options.json });
+    } catch (err) {
+      console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
+      process.exit(1);
+    }
+  });
+
+github
+  .command('import <pr-number>')
+  .description('Import PR review comments as Linear/Jira tasks')
+  .option('--dry-run', 'Preview tasks without creating issues')
+  .option('-v, --verbose', 'Show Claude output')
+  .option('--no-issue-comments', 'Exclude issue comments (only include review comments)')
+  .action(async (prNumber: string, options: { dryRun?: boolean; verbose?: boolean; issueComments?: boolean }) => {
+    try {
+      await importCommand(prNumber, {
+        dryRun: options.dryRun,
+        verbose: options.verbose,
+        includeIssueComments: options.issueComments !== false,
+      });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
       process.exit(1);

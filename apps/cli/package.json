@@ -47,8 +47,10 @@
     "url": "https://github.com/marckraw/ralphy/issues"
   },
   "dependencies": {
-    "@mrck-labs/ralphy-shared": "workspace:*",
     "@linear/sdk": "^70.0.0",
+    "@mrck-labs/ralphy-shared": "workspace:*",
+    "@octokit/request-error": "^7.1.0",
+    "@octokit/rest": "^22.0.1",
     "chalk": "^5.4.1",
     "commander": "^14.0.0",
     "dotenv": "^16.4.0",
