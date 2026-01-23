@@ -11,6 +11,7 @@ import { promoteCommand } from './commands/promote.js';
 import { createCommand } from './commands/create.js';
 import { statusCommand } from './commands/status.js';
 import { watchCommand } from './commands/watch.js';
+import { prsCommand, importCommand } from './commands/github/index.js';
 import { setLogLevel, debug } from '@mrck-labs/ralphy-shared/utils';
 
 // Load environment variables
@@ -188,6 +189,44 @@ program
   .action(async (options: { interval?: string; maxIterations?: number; notify?: boolean; verbose?: boolean; dryRun?: boolean; fifo?: boolean }) => {
     try {
       await watchCommand(options);
+    } catch (err) {
+      console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
+      process.exit(1);
+    }
+  });
+
+// GitHub integration commands
+const github = program
+  .command('github')
+  .description('GitHub integration commands for PR review imports');
+
+github
+  .command('prs')
+  .description('List pull requests with review comments')
+  .option('-s, --state <state>', 'Filter by PR state (open, closed, all)', 'open')
+  .option('--json', 'Output as JSON')
+  .action(async (options: { state?: 'open' | 'closed' | 'all'; json?: boolean }) => {
+    try {
+      await prsCommand({ state: options.state, json: options.json });
+    } catch (err) {
+      console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
+      process.exit(1);
+    }
+  });
+
+github
+  .command('import <pr-number>')
+  .description('Import PR review comments as Linear/Jira tasks')
+  .option('--dry-run', 'Preview tasks without creating issues')
+  .option('-v, --verbose', 'Show Claude output')
+  .option('--no-issue-comments', 'Exclude issue comments (only include review comments)')
+  .action(async (prNumber: string, options: { dryRun?: boolean; verbose?: boolean; issueComments?: boolean }) => {
+    try {
+      await importCommand(prNumber, {
+        dryRun: options.dryRun,
+        verbose: options.verbose,
+        includeIssueComments: options.issueComments !== false,
+      });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
       process.exit(1);

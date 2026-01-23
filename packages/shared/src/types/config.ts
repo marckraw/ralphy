@@ -6,6 +6,7 @@ export const LabelsConfigSchema = z.object({
   ready: z.string().default('ralph-ready'),
   candidate: z.string().default('ralph-candidate'),
   enriched: z.string().default('ralph-enriched'),
+  prFeedback: z.string().default('ralph-pr-feedback'),
 });
 
 export const ClaudeConfigSchema = z.object({
@@ -63,11 +64,24 @@ export const ProviderSchema = z.discriminatedUnion('type', [
   JiraProviderSchema,
 ]);
 
+// ============ Integrations (Supplementary Sources) ============
+
+export const GitHubIntegrationSchema = z.object({
+  token: z.string().optional(), // Falls back to GITHUB_TOKEN env var
+  owner: z.string().min(1), // Repository owner (user or org)
+  repo: z.string().min(1), // Repository name
+});
+
+export const IntegrationsSchema = z.object({
+  github: GitHubIntegrationSchema.optional(),
+});
+
 export const RalphyConfigV2Schema = z.object({
   version: z.literal(2),
   provider: ProviderSchema,
   labels: LabelsConfigSchema,
   claude: ClaudeConfigSchema,
+  integrations: IntegrationsSchema.optional(),
 });
 
 // ============ Type Exports ============
@@ -85,6 +99,8 @@ export type JiraProviderConfig = z.infer<typeof JiraProviderConfigSchema>;
 export type LinearProvider = z.infer<typeof LinearProviderSchema>;
 export type JiraProvider = z.infer<typeof JiraProviderSchema>;
 export type Provider = z.infer<typeof ProviderSchema>;
+export type GitHubIntegration = z.infer<typeof GitHubIntegrationSchema>;
+export type Integrations = z.infer<typeof IntegrationsSchema>;
 export type RalphyConfigV2 = z.infer<typeof RalphyConfigV2Schema>;
 
 // Backwards compatibility aliases
@@ -97,6 +113,7 @@ export const DEFAULT_LABELS: LabelsConfig = {
   ready: 'ralph-ready',
   candidate: 'ralph-candidate',
   enriched: 'ralph-enriched',
+  prFeedback: 'ralph-pr-feedback',
 };
 
 // 20 minutes default timeout - enrichment can take a while for complex issues
