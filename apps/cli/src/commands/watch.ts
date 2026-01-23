@@ -19,6 +19,12 @@ import { getContextDir, getHistoryDir } from '../services/config/paths.js';
 import { isClaudeAvailable } from '../services/claude/executor.js';
 import { runSingleIssue, formatDuration, type RunResult } from './run.js';
 import { notifySuccess, notifyFailure, notifyWarning } from '../utils/notify.js';
+import {
+  prioritizeNextTask,
+  formatPrioritizationDecision,
+  type CompletedTaskContext,
+} from '../services/claude/prioritizer.js';
+import { createSpinner } from '../utils/spinner.js';
 
 /**
  * Watch command options.
@@ -29,6 +35,8 @@ export interface WatchOptions {
   notify?: boolean;
   verbose?: boolean;
   dryRun?: boolean;
+  /** Process issues in FIFO order (skip intelligent prioritization) */
+  fifo?: boolean;
 }
 
 /**
@@ -217,6 +225,7 @@ export async function watchCommand(options: WatchOptions): Promise<void> {
     notify: shouldNotify = false,
     dryRun = false,
     verbose: isVerbose = false,
+    fifo: useFifo = false,
   } = options;
 
   // Parse interval (default: 120 seconds)
@@ -322,16 +331,53 @@ export async function watchCommand(options: WatchOptions): Promise<void> {
     // Found new issues
     console.log(`\n[${formatTimestamp()}] Found ${newIssues.length} new issue(s)`);
 
-    // Process each issue
-    for (let i = 0; i < newIssues.length; i++) {
+    // Use intelligent prioritization for batches (unless --fifo is set)
+    const usePrioritization = newIssues.length > 1 && !useFifo;
+    if (usePrioritization) {
+      logger.info(logger.dim('Using intelligent prioritization. Use --fifo to process in order.'));
+    }
+
+    // Track remaining issues and completed task context for prioritization
+    let remainingIssues = [...newIssues];
+    let lastCompletedTask: CompletedTaskContext | null = null;
+    const totalIssues = newIssues.length;
+
+    // Process issues with prioritization
+    while (remainingIssues.length > 0) {
       if (watchStopRequested) {
         break;
       }
 
-      const issue = newIssues[i];
-      if (!issue) continue;
+      let issue: NormalizedIssue;
 
-      console.log(`\n[${i + 1}/${newIssues.length}] Processing ${issue.identifier}...`);
+      // Determine which issue to process next
+      if (usePrioritization && remainingIssues.length > 1) {
+        // Use intelligent prioritization
+        const prioritizeSpinner = createSpinner('Analyzing tasks for optimal priority...').start();
+        const prioritizeResult = await prioritizeNextTask(
+          remainingIssues,
+          lastCompletedTask,
+          config,
+          { verbose: isVerbose }
+        );
+        prioritizeSpinner.stop();
+
+        if (prioritizeResult.success) {
+          issue = prioritizeResult.selectedIssue;
+          logger.info(`\n${formatPrioritizationDecision(prioritizeResult.decision)}`);
+        } else {
+          // Fallback to FIFO
+          issue = prioritizeResult.fallbackIssue;
+          logger.warn(`Prioritization failed: ${prioritizeResult.error}`);
+          logger.info(`Falling back to first issue: ${issue.identifier}`);
+        }
+      } else {
+        // FIFO mode or single issue - pick first
+        issue = remainingIssues[0]!;
+      }
+
+      const processedCount = totalIssues - remainingIssues.length + 1;
+      console.log(`\n[${processedCount}/${totalIssues}] Processing ${issue.identifier}...`);
 
       if (dryRun) {
         logger.info(logger.dim(`  Would process: ${issue.identifier} - ${issue.title}`));
@@ -339,6 +385,7 @@ export async function watchCommand(options: WatchOptions): Promise<void> {
         logger.info(logger.dim(`  Priority: ${issue.priority}`));
         processedIssueIds.add(issue.id);
         stats.processed++;
+        remainingIssues = remainingIssues.filter(i => i.id !== issue.id);
         continue;
       }
 
@@ -361,6 +408,18 @@ export async function watchCommand(options: WatchOptions): Promise<void> {
         // Mark as processed
         processedIssueIds.add(issue.id);
         stats.processed++;
+
+        // Update completed task context for next prioritization
+        lastCompletedTask = {
+          identifier: issue.identifier,
+          title: issue.title,
+          status: result.status,
+          durationMs: result.totalDurationMs,
+          iterations: result.iterations,
+        };
+
+        // Remove processed issue from remaining list
+        remainingIssues = remainingIssues.filter(i => i.id !== issue.id);
 
         // Update stats based on result
         switch (result.status) {
@@ -402,6 +461,7 @@ export async function watchCommand(options: WatchOptions): Promise<void> {
         processedIssueIds.add(issue.id);
         stats.processed++;
         stats.errors++;
+        remainingIssues = remainingIssues.filter(i => i.id !== issue.id);
       } finally {
         currentlyProcessing = false;
       }

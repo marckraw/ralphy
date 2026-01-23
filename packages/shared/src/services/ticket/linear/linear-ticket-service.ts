@@ -96,44 +96,54 @@ export class LinearTicketService implements TicketService {
     const { teamId, labelName, projectId } = options;
 
     try {
-      const issuesConnection = await this.client.issues({
-        filter: {
-          team: { id: { eq: teamId } },
-          labels: { name: { eq: labelName } },
-          ...(projectId ? { project: { id: { eq: projectId } } } : {}),
-        },
-        orderBy: PaginationOrderBy.UpdatedAt,
-      });
-
       const issues: NormalizedIssue[] = [];
+      let hasNextPage = true;
+      let endCursor: string | null = null;
 
-      for (const issue of issuesConnection.nodes) {
-        const state = await issue.state;
-        const labelsConnection = await issue.labels();
-
-        const labels = labelsConnection.nodes.map((label) => ({
-          id: label.id,
-          name: label.name,
-        }));
-
-        issues.push({
-          id: issue.id,
-          identifier: issue.identifier,
-          title: issue.title,
-          description: issue.description ?? undefined,
-          priority: normalizeLinearPriority(issue.priority),
-          state: state
-            ? {
-                id: state.id,
-                name: state.name,
-                type: state.type,
-              }
-            : { id: '', name: 'Unknown', type: 'unknown' },
-          labels,
-          createdAt: issue.createdAt,
-          updatedAt: issue.updatedAt,
-          url: issue.url,
+      // Paginate through all results
+      while (hasNextPage) {
+        const issuesConnection = await this.client.issues({
+          filter: {
+            team: { id: { eq: teamId } },
+            labels: { name: { eq: labelName } },
+            ...(projectId ? { project: { id: { eq: projectId } } } : {}),
+          },
+          orderBy: PaginationOrderBy.UpdatedAt,
+          first: 100, // Fetch 100 at a time
+          ...(endCursor ? { after: endCursor } : {}),
         });
+
+        for (const issue of issuesConnection.nodes) {
+          const state = await issue.state;
+          const labelsConnection = await issue.labels();
+
+          const labels = labelsConnection.nodes.map((label) => ({
+            id: label.id,
+            name: label.name,
+          }));
+
+          issues.push({
+            id: issue.id,
+            identifier: issue.identifier,
+            title: issue.title,
+            description: issue.description ?? undefined,
+            priority: normalizeLinearPriority(issue.priority),
+            state: state
+              ? {
+                  id: state.id,
+                  name: state.name,
+                  type: state.type,
+                }
+              : { id: '', name: 'Unknown', type: 'unknown' },
+            labels,
+            createdAt: issue.createdAt,
+            updatedAt: issue.updatedAt,
+            url: issue.url,
+          });
+        }
+
+        hasNextPage = issuesConnection.pageInfo.hasNextPage;
+        endCursor = issuesConnection.pageInfo.endCursor ?? null;
       }
 
       return { success: true, data: issues };
@@ -246,8 +256,14 @@ export class LinearTicketService implements TicketService {
       return { success: true, data: undefined };
     }
 
-    // Get the label ID
-    const labelIdResult = await this.getLabelIdByName(labelName);
+    // Get team ID for label lookup
+    const teamIdResult = await this.getTeamIdForIssue(issueId);
+    if (!teamIdResult.success) {
+      return teamIdResult;
+    }
+
+    // Get the label ID (filtered by team)
+    const labelIdResult = await this.getLabelIdByName(labelName, teamIdResult.data);
     if (!labelIdResult.success) {
       return labelIdResult;
     }
@@ -312,10 +328,17 @@ export class LinearTicketService implements TicketService {
       };
     }
 
-    // Get label IDs
+    // Get team ID for label lookup
+    const teamIdResult = await this.getTeamIdForIssue(issueId);
+    if (!teamIdResult.success) {
+      return teamIdResult;
+    }
+    const teamId = teamIdResult.data;
+
+    // Get label IDs (filtered by team)
     const [removeLabelResult, addLabelResult] = await Promise.all([
-      this.getLabelIdByName(removeLabel),
-      this.getLabelIdByName(addLabel),
+      this.getLabelIdByName(removeLabel, teamId),
+      this.getLabelIdByName(addLabel, teamId),
     ]);
 
     if (!removeLabelResult.success) {
@@ -357,11 +380,11 @@ export class LinearTicketService implements TicketService {
       options;
 
     try {
-      // Resolve label names to IDs
+      // Resolve label names to IDs (filter by team to avoid cross-team label conflicts)
       const labelIds: string[] = [];
       if (labelNames && labelNames.length > 0) {
         for (const labelName of labelNames) {
-          const labelIdResult = await this.getLabelIdByName(labelName);
+          const labelIdResult = await this.getLabelIdByName(labelName, teamId);
           if (!labelIdResult.success) {
             return labelIdResult;
           }
@@ -463,17 +486,20 @@ export class LinearTicketService implements TicketService {
 
   // ============ Private Helper Methods ============
 
-  private async getLabelIdByName(labelName: string): Promise<Result<string>> {
+  private async getLabelIdByName(labelName: string, teamId?: string): Promise<Result<string>> {
     try {
       const labelsConnection = await this.client.issueLabels({
-        filter: { name: { eq: labelName } },
+        filter: {
+          name: { eq: labelName },
+          ...(teamId ? { team: { id: { eq: teamId } } } : {}),
+        },
       });
 
       const label = labelsConnection.nodes[0];
       if (!label) {
         return {
           success: false,
-          error: `Label "${labelName}" not found`,
+          error: `Label "${labelName}" not found${teamId ? ' for this team' : ''}`,
         };
       }
 
@@ -482,6 +508,27 @@ export class LinearTicketService implements TicketService {
       return {
         success: false,
         error: `Failed to fetch label: ${err instanceof Error ? err.message : 'Unknown error'}`,
+      };
+    }
+  }
+
+  private async getTeamIdForIssue(issueId: string): Promise<Result<string>> {
+    try {
+      const issue = await this.client.issue(issueId);
+      const team = await issue.team;
+
+      if (!team) {
+        return {
+          success: false,
+          error: 'Could not determine team for issue',
+        };
+      }
+
+      return { success: true, data: team.id };
+    } catch (err) {
+      return {
+        success: false,
+        error: `Failed to fetch issue team: ${err instanceof Error ? err.message : 'Unknown error'}`,
       };
     }
   }

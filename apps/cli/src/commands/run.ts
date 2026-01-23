@@ -26,6 +26,11 @@ import { buildPrompt, buildInitialProgressContent } from '../services/claude/pro
 import { handleRateLimit } from '../services/claude/rate-limiter.js';
 import { createSpinner } from '../utils/spinner.js';
 import { notifySuccess, notifyFailure, notifyWarning } from '../utils/notify.js';
+import {
+  prioritizeNextTask,
+  formatPrioritizationDecision,
+  type CompletedTaskContext,
+} from '../services/claude/prioritizer.js';
 
 /**
  * Emergency stop state for graceful shutdown.
@@ -88,6 +93,8 @@ export interface RunOptions {
   allReady?: boolean | undefined;
   dryRun?: boolean | undefined;
   verbose?: boolean | undefined;
+  /** Process issues in FIFO order (skip intelligent prioritization) */
+  fifo?: boolean | undefined;
 }
 
 /**
@@ -509,6 +516,7 @@ export async function runCommand(
     allReady = false,
     dryRun = false,
     verbose: isVerbose = false,
+    fifo: useFifo = false,
   } = options;
 
   // Validate arguments
@@ -662,19 +670,57 @@ export async function runCommand(
     logger.info(logger.dim('Tip: Press Ctrl+C to stop after current issue, twice to force exit.\n'));
   }
 
-  for (let i = 0; i < issuesToProcess.length; i++) {
+  // Use intelligent prioritization for batch mode (unless --fifo is set)
+  const usePrioritization = allReady && issuesToProcess.length > 1 && !useFifo;
+  if (usePrioritization) {
+    logger.info(logger.dim('Using intelligent prioritization. Use --fifo to process in order.\n'));
+  }
+
+  // Track remaining issues and completed task context for prioritization
+  let remainingIssues = [...issuesToProcess];
+  let lastCompletedTask: CompletedTaskContext | null = null;
+  const totalIssues = issuesToProcess.length;
+
+  while (remainingIssues.length > 0) {
     // Check for emergency stop before starting a new issue
     if (isEmergencyStopRequested()) {
-      logger.warn(`\nEmergency stop: Skipping remaining ${issuesToProcess.length - i} issue(s).`);
+      logger.warn(`\nEmergency stop: Skipping remaining ${remainingIssues.length} issue(s).`);
       break;
     }
 
-    const issue = issuesToProcess[i];
-    if (!issue) continue;
+    let issue: NormalizedIssue;
 
-    if (allReady && issuesToProcess.length > 1) {
+    // Determine which issue to process next
+    if (usePrioritization && remainingIssues.length > 1) {
+      // Use intelligent prioritization
+      const prioritizeSpinner = createSpinner('Analyzing tasks for optimal priority...').start();
+      const prioritizeResult = await prioritizeNextTask(
+        remainingIssues,
+        lastCompletedTask,
+        config,
+        { verbose: isVerbose }
+      );
+      prioritizeSpinner.stop();
+
+      if (prioritizeResult.success) {
+        issue = prioritizeResult.selectedIssue;
+        logger.info(`\n${formatPrioritizationDecision(prioritizeResult.decision)}`);
+      } else {
+        // Fallback to FIFO
+        issue = prioritizeResult.fallbackIssue;
+        logger.warn(`Prioritization failed: ${prioritizeResult.error}`);
+        logger.info(`Falling back to first issue: ${issue.identifier}`);
+      }
+    } else {
+      // FIFO mode or single issue - pick first
+      issue = remainingIssues[0]!;
+    }
+
+    const processedCount = totalIssues - remainingIssues.length + 1;
+
+    if (allReady && totalIssues > 1) {
       logger.info(`\n${'#'.repeat(60)}`);
-      logger.info(`# Issue ${i + 1} of ${issuesToProcess.length}`);
+      logger.info(`# Issue ${processedCount} of ${totalIssues}`);
       logger.info(`${'#'.repeat(60)}`);
     }
 
@@ -690,6 +736,18 @@ export async function runCommand(
     );
 
     results.push(result);
+
+    // Update completed task context for next prioritization
+    lastCompletedTask = {
+      identifier: issue.identifier,
+      title: issue.title,
+      status: result.status,
+      durationMs: result.totalDurationMs,
+      iterations: result.iterations,
+    };
+
+    // Remove processed issue from remaining list
+    remainingIssues = remainingIssues.filter(i => i.id !== issue.id);
 
     // Send notification if requested
     if (shouldNotify) {

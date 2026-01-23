@@ -1,9 +1,16 @@
 import { loadConfigV2 } from '../services/config/manager.js';
-import { createTicketService, logger, type TicketService } from '@mrck-labs/ralphy-shared';
+import {
+  createTicketService,
+  logger,
+  isLinearProvider,
+  filterActionableIssues,
+  type TicketService,
+} from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../utils/spinner.js';
 
 interface PromoteOptions {
   dryRun?: boolean | undefined;
+  allCandidates?: boolean | undefined;
 }
 
 interface PromoteResult {
@@ -53,7 +60,7 @@ export async function promoteCommand(
   issueIds: string[],
   options: PromoteOptions = {}
 ): Promise<void> {
-  const { dryRun = false } = options;
+  const { dryRun = false, allCandidates = false } = options;
 
   // Load config (v2 normalized)
   const configResult = await loadConfigV2();
@@ -69,10 +76,54 @@ export async function promoteCommand(
   // Create ticket service based on provider
   const ticketService = createTicketService(config);
 
+  // If --all-candidates is set, fetch all candidates
+  let issuesToPromote = issueIds;
+
+  if (allCandidates) {
+    const spinner = createSpinner('Fetching all candidate issues...').start();
+
+    const teamId = isLinearProvider(config.provider)
+      ? config.provider.config.teamId
+      : config.provider.config.projectId;
+
+    const projectId = isLinearProvider(config.provider)
+      ? config.provider.config.projectId
+      : undefined;
+
+    const issuesResult = await ticketService.fetchIssuesByLabel({
+      teamId,
+      labelName: candidateLabel,
+      projectId,
+    });
+
+    if (!issuesResult.success) {
+      spinner.fail('Failed to fetch candidate issues');
+      logger.error(issuesResult.error);
+      process.exit(1);
+    }
+
+    // Filter to only actionable issues (not already done/in review)
+    const actionableIssues = filterActionableIssues(issuesResult.data);
+    issuesToPromote = actionableIssues.map(issue => issue.identifier);
+
+    if (issuesToPromote.length === 0) {
+      spinner.succeed('No actionable candidate issues found to promote');
+      return;
+    }
+
+    spinner.succeed(`Found ${issuesToPromote.length} candidate issue(s) to promote`);
+    console.log('');
+  }
+
+  if (issuesToPromote.length === 0) {
+    logger.error('No issues specified. Provide issue IDs or use --all-candidates');
+    process.exit(1);
+  }
+
   if (dryRun) {
     logger.info(logger.dim('[Dry run mode - no changes will be made]'));
     console.log('');
-    for (const issueId of issueIds) {
+    for (const issueId of issuesToPromote) {
       logger.info(`Would promote issue ${logger.highlight(issueId)}`);
       logger.info(`  Remove label: ${logger.highlight(candidateLabel)}`);
       logger.info(`  Add label: ${logger.highlight(readyLabel)}`);
@@ -84,13 +135,13 @@ export async function promoteCommand(
   // Process each issue
   const results: PromoteResult[] = [];
 
-  for (const issueId of issueIds) {
+  for (const issueId of issuesToPromote) {
     const result = await promoteSingleIssue(issueId, ticketService, candidateLabel, readyLabel);
     results.push(result);
   }
 
   // Show summary if multiple issues were processed
-  if (issueIds.length > 1) {
+  if (issuesToPromote.length > 1) {
     const successCount = results.filter((r) => r.success && !r.skipped).length;
     const skippedCount = results.filter((r) => r.skipped).length;
     const failedCount = results.filter((r) => !r.success).length;
@@ -99,7 +150,7 @@ export async function promoteCommand(
     logger.info('='.repeat(50));
     logger.info('Promotion Summary');
     logger.info('='.repeat(50));
-    logger.info(`Total issues: ${issueIds.length}`);
+    logger.info(`Total issues: ${issuesToPromote.length}`);
     logger.success(`Promoted: ${successCount}`);
     if (skippedCount > 0) {
       logger.warn(`Already ready: ${skippedCount}`);

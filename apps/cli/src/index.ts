@@ -86,7 +86,8 @@ program
   .option('--all-ready', 'Process all issues with the ralph-ready label')
   .option('--dry-run', 'Preview which issues would be processed without running')
   .option('--verbose', 'Show Claude tool activity in real-time')
-  .action(async (issue: string | undefined, options: { maxIterations?: number; autoCommit?: boolean; notify?: boolean; allReady?: boolean; dryRun?: boolean; verbose?: boolean }) => {
+  .option('--fifo', 'Process issues in FIFO order (skip intelligent prioritization)')
+  .action(async (issue: string | undefined, options: { maxIterations?: number; autoCommit?: boolean; notify?: boolean; allReady?: boolean; dryRun?: boolean; verbose?: boolean; fifo?: boolean }) => {
     try {
       await runCommand(issue, {
         maxIterations: options.maxIterations,
@@ -95,6 +96,7 @@ program
         allReady: options.allReady,
         dryRun: options.dryRun,
         verbose: options.verbose,
+        fifo: options.fifo,
       });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
@@ -124,13 +126,15 @@ program
   });
 
 program
-  .command('promote <issues...>')
+  .command('promote [issues...]')
   .description('Promote one or more issues from ralph-candidate to ralph-ready')
   .option('--dry-run', 'Preview label changes without updating Linear')
-  .action(async (issues: string[], options: { dryRun?: boolean }) => {
+  .option('--all-candidates', 'Promote all candidate issues to ready')
+  .action(async (issues: string[], options: { dryRun?: boolean; allCandidates?: boolean }) => {
     try {
       await promoteCommand(issues, {
         dryRun: options.dryRun,
+        allCandidates: options.allCandidates,
       });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');
@@ -180,7 +184,8 @@ program
   .option('--notify', 'Desktop notification on completion')
   .option('--verbose', 'Show Claude tool activity')
   .option('--dry-run', 'Preview mode')
-  .action(async (options: { interval?: string; maxIterations?: number; notify?: boolean; verbose?: boolean; dryRun?: boolean }) => {
+  .option('--fifo', 'Process issues in FIFO order (skip intelligent prioritization)')
+  .action(async (options: { interval?: string; maxIterations?: number; notify?: boolean; verbose?: boolean; dryRun?: boolean; fifo?: boolean }) => {
     try {
       await watchCommand(options);
     } catch (err) {

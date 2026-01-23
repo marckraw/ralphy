@@ -38,6 +38,8 @@ export interface ConfigStatusInfo {
   providerType: 'linear' | 'jira' | null;
   projectName: string | null;
   teamId: string | null;
+  teamName: string | null;
+  projectId: string | null;
   labels: {
     candidate: string;
     ready: string;
@@ -137,12 +139,17 @@ export function extractConfigStatus(config: RalphyConfigV2): ConfigStatusInfo {
   const teamId = isLinearProvider(config.provider)
     ? config.provider.config.teamId
     : config.provider.config.projectKey;
+  const projectId = isLinearProvider(config.provider)
+    ? config.provider.config.projectId
+    : config.provider.config.projectId;
 
   return {
     initialized: true,
     providerType,
     projectName,
     teamId,
+    teamName: null, // Will be populated by fetching from API
+    projectId,
     labels: config.labels,
     claude: config.claude,
   };
@@ -226,8 +233,8 @@ export function formatStatusOutput(data: StatusData): string {
   } else {
     lines.push(`  Status: ${logger.highlight('Initialized')}`);
     lines.push(`  Provider: ${logger.highlight(data.config.providerType ?? 'unknown')}`);
-    lines.push(`  Project: ${logger.highlight(data.config.projectName ?? 'unknown')}`);
-    lines.push(`  Team/Project ID: ${logger.dim(data.config.teamId ?? 'unknown')}`);
+    lines.push(`  Team: ${logger.highlight(data.config.teamName ?? 'unknown')} ${logger.dim(`(${data.config.teamId ?? 'unknown'})`)}`);
+    lines.push(`  Project: ${logger.highlight(data.config.projectName ?? 'unknown')} ${logger.dim(`(${data.config.projectId ?? 'unknown'})`)}`);
 
     if (data.config.labels) {
       lines.push(`  Labels:`);
@@ -451,6 +458,8 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
       providerType: null,
       projectName: null,
       teamId: null,
+      teamName: null,
+      projectId: null,
       labels: null,
       claude: null,
     },
@@ -480,17 +489,27 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
       const config = configResult.data;
       statusData.config = extractConfigStatus(config);
 
-      // Fetch issue stats in parallel with provider validation
+      // Fetch issue stats, provider validation, and team name in parallel
       spinner.text('Fetching issue statistics...');
 
-      const [issueStats, providerStatus] = await Promise.all([
+      const ticketService = createTicketService(config);
+      const [issueStats, providerStatus, teamsResult] = await Promise.all([
         fetchIssueStats(config),
         validateProviderConnection(config),
+        ticketService.fetchTeams(),
       ]);
 
       statusData.issues = issueStats;
       statusData.health.providerConnected = providerStatus.connected;
       statusData.health.providerError = providerStatus.error;
+
+      // Resolve team name from ID
+      if (teamsResult.success && statusData.config.teamId) {
+        const team = teamsResult.data.find(t => t.id === statusData.config.teamId);
+        if (team) {
+          statusData.config.teamName = team.name;
+        }
+      }
     } else {
       statusData.config.initialized = false;
       spinner.warn('Config file exists but is invalid');

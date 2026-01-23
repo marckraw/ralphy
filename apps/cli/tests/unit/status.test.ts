@@ -192,6 +192,8 @@ describe('status command pure functions', () => {
       expect(status.providerType).toBe('linear');
       expect(status.projectName).toBe('My Project');
       expect(status.teamId).toBe('team-456');
+      expect(status.teamName).toBeNull(); // Populated later by API call
+      expect(status.projectId).toBe('proj-123');
       expect(status.labels).toEqual({
         candidate: 'ralph-candidate',
         ready: 'ralph-ready',
@@ -236,6 +238,8 @@ describe('status command pure functions', () => {
       expect(status.providerType).toBe('jira');
       expect(status.projectName).toBe('Jira Project');
       expect(status.teamId).toBe('PROJ');
+      expect(status.teamName).toBeNull(); // Populated later by API call
+      expect(status.projectId).toBe('jira-proj-123');
     });
   });
 
