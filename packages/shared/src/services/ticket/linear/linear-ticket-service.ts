@@ -380,11 +380,11 @@ export class LinearTicketService implements TicketService {
       options;
 
     try {
-      // Resolve label names to IDs (filter by team to avoid cross-team label conflicts)
+      // Resolve label names to IDs (get or create labels if they don't exist)
       const labelIds: string[] = [];
       if (labelNames && labelNames.length > 0) {
         for (const labelName of labelNames) {
-          const labelIdResult = await this.getLabelIdByName(labelName, teamId);
+          const labelIdResult = await this.getOrCreateLabel(labelName, teamId);
           if (!labelIdResult.success) {
             return labelIdResult;
           }
@@ -508,6 +508,41 @@ export class LinearTicketService implements TicketService {
       return {
         success: false,
         error: `Failed to fetch label: ${err instanceof Error ? err.message : 'Unknown error'}`,
+      };
+    }
+  }
+
+  /**
+   * Gets a label by name, creating it if it doesn't exist.
+   * Ensures labels are team-scoped to avoid cross-team conflicts.
+   */
+  private async getOrCreateLabel(labelName: string, teamId: string): Promise<Result<string>> {
+    // First try to get the existing label
+    const existingResult = await this.getLabelIdByName(labelName, teamId);
+    if (existingResult.success) {
+      return existingResult;
+    }
+
+    // Label doesn't exist, create it
+    try {
+      const createResult = await this.client.createIssueLabel({
+        name: labelName,
+        teamId,
+      });
+
+      const label = await createResult.issueLabel;
+      if (!label) {
+        return {
+          success: false,
+          error: `Failed to create label "${labelName}": no label returned`,
+        };
+      }
+
+      return { success: true, data: label.id };
+    } catch (err) {
+      return {
+        success: false,
+        error: `Failed to create label "${labelName}": ${err instanceof Error ? err.message : 'Unknown error'}`,
       };
     }
   }
