@@ -88,8 +88,20 @@ program
   .option('--dry-run', 'Preview which issues would be processed without running')
   .option('--verbose', 'Show Claude tool activity in real-time')
   .option('--fifo', 'Process issues in FIFO order (skip intelligent prioritization)')
-  .action(async (issue: string | undefined, options: { maxIterations?: number; autoCommit?: boolean; notify?: boolean; allReady?: boolean; dryRun?: boolean; verbose?: boolean; fifo?: boolean }) => {
+  .option('-p, --priority <priorities...>', 'Filter by priority (urgent, high, medium, low, none)')
+  .action(async (issue: string | undefined, options: { maxIterations?: number; autoCommit?: boolean; notify?: boolean; allReady?: boolean; dryRun?: boolean; verbose?: boolean; fifo?: boolean; priority?: string[] }) => {
     try {
+      // Validate priority values
+      const validPriorities = ['urgent', 'high', 'medium', 'low', 'none'];
+      const priorityFilter = options.priority?.filter(p => validPriorities.includes(p)) as Array<'urgent' | 'high' | 'medium' | 'low' | 'none'> | undefined;
+
+      if (options.priority && priorityFilter && priorityFilter.length !== options.priority.length) {
+        const invalid = options.priority.filter(p => !validPriorities.includes(p));
+        console.error(`Invalid priority value(s): ${invalid.join(', ')}`);
+        console.error(`Valid values: ${validPriorities.join(', ')}`);
+        process.exit(1);
+      }
+
       await runCommand(issue, {
         maxIterations: options.maxIterations,
         autoCommit: options.autoCommit,
@@ -98,6 +110,7 @@ program
         dryRun: options.dryRun,
         verbose: options.verbose,
         fifo: options.fifo,
+        priority: priorityFilter,
       });
     } catch (err) {
       console.error('Error:', err instanceof Error ? err.message : 'Unknown error');

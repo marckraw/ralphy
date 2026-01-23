@@ -84,6 +84,11 @@ function isEmergencyStopRequested(): boolean {
 }
 
 /**
+ * Valid priority filter values.
+ */
+export type PriorityFilter = 'urgent' | 'high' | 'medium' | 'low' | 'none';
+
+/**
  * Run command options.
  */
 export interface RunOptions {
@@ -95,6 +100,8 @@ export interface RunOptions {
   verbose?: boolean | undefined;
   /** Process issues in FIFO order (skip intelligent prioritization) */
   fifo?: boolean | undefined;
+  /** Filter issues by priority (can specify multiple) */
+  priority?: PriorityFilter[] | undefined;
 }
 
 /**
@@ -517,6 +524,7 @@ export async function runCommand(
     dryRun = false,
     verbose: isVerbose = false,
     fifo: useFifo = false,
+    priority: priorityFilter,
   } = options;
 
   // Validate arguments
@@ -588,9 +596,31 @@ export async function runCommand(
       }
     }
 
+    // Filter by priority if specified
+    if (priorityFilter && priorityFilter.length > 0) {
+      const filteredOutByPriority = issuesToProcess.filter(
+        issue => !priorityFilter.includes(issue.priority)
+      );
+      issuesToProcess = issuesToProcess.filter(
+        issue => priorityFilter.includes(issue.priority)
+      );
+
+      if (filteredOutByPriority.length > 0) {
+        logger.info(`\nFiltering by priority: ${priorityFilter.join(', ')}`);
+        logger.info(`Skipping ${filteredOutByPriority.length} issue(s) with different priority:`);
+        for (const issue of filteredOutByPriority) {
+          logger.info(logger.dim(`  - ${issue.identifier}: ${issue.title} (${issue.priority})`));
+        }
+      }
+    }
+
     if (issuesToProcess.length === 0) {
       logger.info(`\nNo actionable issues found with the "${logger.highlight(config.labels.ready)}" label.`);
-      logger.info('All issues are already Done or In Review.');
+      if (priorityFilter && priorityFilter.length > 0) {
+        logger.info(`No issues match the priority filter: ${priorityFilter.join(', ')}`);
+      } else {
+        logger.info('All issues are already Done or In Review.');
+      }
       return;
     }
 
