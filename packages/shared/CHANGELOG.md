@@ -1,5 +1,11 @@
 # @mrck-labs/ralphy-shared
 
+## 1.3.0
+
+### Minor Changes
+
+- 92ea84f: prioritization in run command
+
 ## 1.2.0
 
 ### Minor Changes
