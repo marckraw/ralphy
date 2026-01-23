@@ -218,6 +218,15 @@ export async function updateConfigV2(
     integrations: {
       ...existingConfig.integrations,
       ...(updates.integrations ?? {}),
+      // Deep merge github integration to preserve existing fields
+      ...(updates.integrations?.github
+        ? {
+            github: {
+              ...existingConfig.integrations?.github,
+              ...updates.integrations.github,
+            },
+          }
+        : {}),
     },
   };
 
