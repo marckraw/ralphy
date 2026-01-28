@@ -1,5 +1,12 @@
 # @mrck-labs/ralphy
 
+## 1.7.1
+
+### Patch Changes
+
+- Updated dependencies [01fc47a]
+  - @mrck-labs/ralphy-shared@1.5.0
+
 ## 1.7.0
 
 ### Minor Changes
