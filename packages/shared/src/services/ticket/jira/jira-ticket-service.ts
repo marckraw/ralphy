@@ -1,5 +1,6 @@
 import { Version3Client } from 'jira.js';
-import { markdownToAdf } from 'marklassian';
+import type { Document as JiraDocument } from 'jira.js/version3/models/document';
+import { Parser } from 'extended-markdown-adf-parser';
 import type {
   LabelsConfig,
   JiraProviderConfig,
@@ -10,6 +11,7 @@ import type {
   FetchIssuesByLabelOptions,
   NormalizedIssue,
   NormalizedLabel,
+  NormalizedPriority,
   NormalizedProject,
   NormalizedTeam,
   ProjectContext,
@@ -17,7 +19,10 @@ import type {
   SwapResult,
   TicketService,
 } from '../../../types/ticket-service.js';
-import { normalizeJiraPriority } from '../../../types/ticket-service.js';
+import {
+  normalizeJiraPriority,
+  normalizedToJiraPriority,
+} from '../../../types/ticket-service.js';
 import { logger } from '../../../utils/logger.js';
 
 /**
@@ -197,9 +202,9 @@ export class JiraTicketService implements TicketService {
     logger.debug(`[JiraTicketService] Description length: ${description.length} chars`);
 
     try {
-      // Convert markdown to Atlassian Document Format (ADF) using marklassian library
-      const adfDescription = markdownToAdf(description);
-      logger.debug(`[JiraTicketService] ADF conversion complete (using marklassian)`);
+      // Convert markdown to Atlassian Document Format (ADF)
+      const adfDescription = this.convertMarkdownToAdf(description);
+      logger.debug(`[JiraTicketService] ADF conversion complete (using extended-markdown-adf-parser)`);
       logger.debug(`[JiraTicketService] ADF preview: ${JSON.stringify(adfDescription).slice(0, 500)}...`);
 
       await this.client.issues.editIssue({
@@ -359,28 +364,279 @@ export class JiraTicketService implements TicketService {
     }
   }
 
-  async createIssue(_options: CreateIssueOptions): Promise<Result<CreatedIssue>> {
-    return {
-      success: false,
-      error: 'Creating issues in Jira is not implemented yet',
-    };
+  async createIssue(options: CreateIssueOptions): Promise<Result<CreatedIssue>> {
+    logger.debug(`[JiraTicketService] createIssue called`);
+    logger.debug(`[JiraTicketService] Title: ${options.title}`);
+
+    try {
+      // Build base fields
+      const baseFields: Record<string, unknown> = {
+        summary: options.title,
+        project: { key: this.config.projectKey },
+        issuetype: { name: 'Task' },
+      };
+
+      if (options.priority) {
+        const resolvedPriority = await this.resolveJiraPriority(options.priority);
+        if (resolvedPriority) {
+          baseFields['priority'] = resolvedPriority;
+        } else {
+          logger.debug(`[JiraTicketService] Could not resolve priority "${options.priority}", skipping`);
+        }
+      }
+
+      if (options.labelNames && options.labelNames.length > 0) {
+        baseFields['labels'] = options.labelNames;
+      }
+
+      if (options.description) {
+        baseFields['description'] = this.convertMarkdownToAdf(options.description);
+      }
+
+      let created: { id?: string; key?: string };
+      try {
+        created = await this.client.issues.createIssue({
+          fields: baseFields,
+        } as unknown as { fields: { summary: string; project: { key: string }; issuetype: { name: string } } });
+      } catch (firstErr) {
+        if (options.description) {
+          // ADF might be rejected — fall back to plain string (jira.js wraps it in basic ADF)
+          logger.debug(`[JiraTicketService] ADF rejected, retrying with plain string description`);
+          baseFields['description'] = options.description;
+          created = await this.client.issues.createIssue({
+            fields: baseFields,
+          } as unknown as { fields: { summary: string; project: { key: string }; issuetype: { name: string } } });
+        } else {
+          throw firstErr;
+        }
+      }
+
+      const key = created.key ?? '';
+      const url = `${this.config.host}/browse/${key}`;
+
+      logger.debug(`[JiraTicketService] Issue created: ${key}`);
+
+      return {
+        success: true,
+        data: {
+          id: created.id ?? '',
+          identifier: key,
+          title: options.title,
+          url,
+        },
+      };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      logger.debug(`[JiraTicketService] Create error: ${errorMessage}`);
+      let detail = '';
+      if (err instanceof Error && 'response' in err) {
+        const response = (err as { response?: { status?: number; data?: unknown } }).response;
+        logger.debug(`[JiraTicketService] Response status: ${response?.status}`);
+        logger.debug(`[JiraTicketService] Response data: ${JSON.stringify(response?.data)}`);
+        if (response?.data) {
+          detail = ` — ${JSON.stringify(response.data)}`;
+        }
+      }
+      return {
+        success: false,
+        error: `Failed to create issue: ${errorMessage}${detail}`,
+      };
+    }
   }
 
-  async addComment(_issueId: string, _body: string): Promise<Result<void>> {
-    return {
-      success: false,
-      error: 'Adding comments in Jira is not implemented yet',
-    };
+  async addComment(issueId: string, body: string): Promise<Result<void>> {
+    logger.debug(`[JiraTicketService] addComment called for ${issueId}`);
+
+    try {
+      const adfBody = this.convertMarkdownToAdf(body);
+
+      try {
+        await this.client.issueComments.addComment({
+          issueIdOrKey: issueId,
+          comment: adfBody,
+        });
+      } catch (adfErr) {
+        // ADF rejected — fall back to plain string (jira.js wraps it in basic ADF)
+        logger.debug(`[JiraTicketService] ADF comment rejected, retrying with plain string`);
+        await this.client.issueComments.addComment({
+          issueIdOrKey: issueId,
+          comment: body,
+        });
+      }
+
+      logger.debug(`[JiraTicketService] Comment added successfully`);
+      return { success: true, data: undefined };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      logger.debug(`[JiraTicketService] Add comment error: ${errorMessage}`);
+      return {
+        success: false,
+        error: `Failed to add comment: ${errorMessage}`,
+      };
+    }
   }
 
-  async updateIssueState(_issueId: string, _stateName: string): Promise<Result<void>> {
-    return {
-      success: false,
-      error: 'Updating issue state in Jira is not implemented yet',
-    };
+  async updateIssueState(issueId: string, stateName: string): Promise<Result<void>> {
+    logger.debug(`[JiraTicketService] updateIssueState called for ${issueId} -> ${stateName}`);
+
+    try {
+      // Fetch available transitions for this issue
+      const transitionsResult = await this.client.issues.getTransitions({
+        issueIdOrKey: issueId,
+      });
+
+      const transitions = transitionsResult.transitions ?? [];
+      logger.debug(`[JiraTicketService] Available transitions: ${transitions.map((t) => t.name).join(', ')}`);
+
+      // Find matching transition (case-insensitive match on transition name or target state name)
+      const lowerStateName = stateName.toLowerCase();
+      const matched = transitions.find(
+        (t) =>
+          t.name?.toLowerCase() === lowerStateName ||
+          (t.to && t.to.name?.toLowerCase() === lowerStateName)
+      );
+
+      if (!matched || !matched.id) {
+        const availableNames = transitions
+          .map((t) => {
+            const targetName = t.to?.name;
+            return targetName && targetName !== t.name
+              ? `${t.name} (-> ${targetName})`
+              : t.name;
+          })
+          .join(', ');
+
+        return {
+          success: false,
+          error: `No transition found matching "${stateName}". Available transitions: ${availableNames}`,
+        };
+      }
+
+      await this.client.issues.doTransition({
+        issueIdOrKey: issueId,
+        transition: { id: matched.id },
+      });
+
+      logger.debug(`[JiraTicketService] Transition "${matched.name}" executed successfully`);
+      return { success: true, data: undefined };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      logger.debug(`[JiraTicketService] Update state error: ${errorMessage}`);
+      return {
+        success: false,
+        error: `Failed to update issue state: ${errorMessage}`,
+      };
+    }
   }
 
   // ============ Private Helper Methods ============
+
+  /**
+   * Resolves a normalized priority to a Jira priority by fetching available
+   * priorities from the instance and matching by name (case-insensitive).
+   * Falls back to closest match: urgent/high → "High", medium/low/none → "Low".
+   */
+  private async resolveJiraPriority(
+    priority: NormalizedPriority,
+  ): Promise<{ id: string } | undefined> {
+    try {
+      const result = await this.client.issuePriorities.searchPriorities({});
+      const available = result.values ?? [];
+      logger.debug(
+        `[JiraTicketService] Available priorities: ${available.map((p) => `${p.name} (${p.id})`).join(', ')}`,
+      );
+
+      const desiredName = normalizedToJiraPriority(priority).name.toLowerCase();
+
+      // Exact match first
+      const exact = available.find(
+        (p) => p.name?.toLowerCase() === desiredName,
+      );
+      if (exact?.id) return { id: exact.id };
+
+      // Closest match: urgent/high → highest available, medium/low/none → lowest available
+      const isHighPriority = priority === 'urgent' || priority === 'high';
+      const fallback = isHighPriority ? available[0] : available[available.length - 1];
+      if (fallback?.id) {
+        logger.debug(
+          `[JiraTicketService] No exact match for "${desiredName}", using "${fallback.name}"`,
+        );
+        return { id: fallback.id };
+      }
+
+      return undefined;
+    } catch (err) {
+      logger.debug(
+        `[JiraTicketService] Failed to fetch priorities: ${err instanceof Error ? err.message : 'Unknown'}`,
+      );
+      return undefined;
+    }
+  }
+
+  private convertMarkdownToAdf(markdown: string): JiraDocument {
+    if (!markdown) {
+      return { type: 'doc', version: 1, content: [] } as unknown as JiraDocument;
+    }
+
+    try {
+      const parser = new Parser();
+      const adf = parser.markdownToAdf(markdown);
+      // Post-process: Jira requires table cells to contain block-level nodes (paragraph),
+      // but the parser may produce inline text nodes directly inside tableCell/tableHeader.
+      this.fixAdfTableCells(adf as unknown as Record<string, unknown>);
+      return adf as JiraDocument;
+    } catch (err) {
+      logger.debug(`[JiraTicketService] ADF conversion failed, using plain text fallback: ${err instanceof Error ? err.message : 'Unknown'}`);
+      // Fallback: wrap raw markdown in a simple text paragraph (same pattern as ralphy-jira-agent)
+      return {
+        type: 'doc',
+        version: 1,
+        content: [
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', text: markdown }],
+          },
+        ],
+      } as unknown as JiraDocument;
+    }
+  }
+
+  /**
+   * Recursively walks the ADF tree and wraps any inline content
+   * inside tableCell / tableHeader nodes with a paragraph node.
+   */
+  private fixAdfTableCells(node: Record<string, unknown>): void {
+    const content = node['content'] as Record<string, unknown>[] | undefined;
+    if (!Array.isArray(content)) return;
+
+    for (let i = 0; i < content.length; i++) {
+      const child = content[i];
+      if (!child || typeof child !== 'object') continue;
+
+      const type = child['type'] as string | undefined;
+
+      if (type === 'tableCell' || type === 'tableHeader') {
+        const cellContent = child['content'] as Record<string, unknown>[] | undefined;
+        if (!Array.isArray(cellContent) || cellContent.length === 0) {
+          // Empty cells must have at least one block-level child
+          child['content'] = [{ type: 'paragraph', content: [] }];
+        } else {
+          const hasOnlyInline = cellContent.every(
+            (c) => {
+              const t = (c as Record<string, unknown>)['type'] as string;
+              return t === 'text' || t === 'hardBreak' || t === 'inlineCard' || t === 'emoji' || t === 'mention';
+            },
+          );
+          if (hasOnlyInline) {
+            child['content'] = [{ type: 'paragraph', content: cellContent }];
+          }
+        }
+      }
+
+      // Recurse into children
+      this.fixAdfTableCells(child);
+    }
+  }
 
   private normalizeIssue(issue: {
     id?: string;
