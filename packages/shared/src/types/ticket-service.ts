@@ -231,11 +231,23 @@ export function normalizedToLinearPriority(priority: NormalizedPriority): number
   return NORMALIZED_TO_LINEAR_PRIORITY[priority] ?? 0;
 }
 
+export const NORMALIZED_TO_JIRA_PRIORITY: Record<NormalizedPriority, { id: string; name: string }> = {
+  urgent: { id: '1', name: 'Highest' },
+  high: { id: '2', name: 'High' },
+  medium: { id: '3', name: 'Medium' },
+  low: { id: '4', name: 'Low' },
+  none: { id: '5', name: 'Lowest' },
+};
+
 export function normalizeJiraPriority(
   priority: string | undefined
 ): NormalizedPriority {
   if (!priority) return 'none';
   return JIRA_TO_NORMALIZED_PRIORITY[priority] ?? 'none';
+}
+
+export function normalizedToJiraPriority(priority: NormalizedPriority): { id: string; name: string } {
+  return NORMALIZED_TO_JIRA_PRIORITY[priority];
 }
 
 // Human-readable priority labels
