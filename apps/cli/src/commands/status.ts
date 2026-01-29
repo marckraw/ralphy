@@ -17,6 +17,7 @@ import {
   type Result,
 } from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../utils/spinner.js';
+import { formatDuration, extractTeamAndProjectIds } from '../utils/index.js';
 
 // ============ Types ============
 
@@ -153,25 +154,6 @@ export function extractConfigStatus(config: RalphyConfigV2): ConfigStatusInfo {
     labels: config.labels,
     claude: config.claude,
   };
-}
-
-/**
- * Formats duration in milliseconds to human-readable string.
- */
-export function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-
-  if (hours > 0) {
-    const remainingMinutes = minutes % 60;
-    return `${hours}h ${remainingMinutes}m`;
-  }
-  if (minutes > 0) {
-    const remainingSeconds = seconds % 60;
-    return `${minutes}m ${remainingSeconds}s`;
-  }
-  return `${seconds}s`;
 }
 
 /**
@@ -375,14 +357,7 @@ async function readHistoryRuns(cwd: string = process.cwd()): Promise<HistoryRun[
  */
 async function fetchIssueStats(config: RalphyConfigV2): Promise<IssueStats> {
   const ticketService = createTicketService(config);
-
-  const teamId = isLinearProvider(config.provider)
-    ? config.provider.config.teamId
-    : config.provider.config.projectId;
-
-  const projectId = isLinearProvider(config.provider)
-    ? config.provider.config.projectId
-    : undefined;
+  const { teamId, projectId } = extractTeamAndProjectIds(config);
 
   try {
     const [candidatesResult, readyResult, enrichedResult] = await Promise.all([

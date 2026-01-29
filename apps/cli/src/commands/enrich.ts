@@ -3,16 +3,13 @@
  */
 
 import { execa } from 'execa';
-import { loadAndResolveConfig } from '../services/config/manager.js';
 import {
   createTicketService,
   logger,
-  isLinearProvider,
   type NormalizedIssue,
   type ProjectContext,
   type TicketService,
 } from '@mrck-labs/ralphy-shared';
-import { isClaudeAvailable } from '../services/claude/executor.js';
 import {
   buildEnrichmentPrompt,
   parseEnrichedContent,
@@ -21,6 +18,13 @@ import {
   buildEnrichmentClaudeArgs,
 } from '../services/claude/enricher.js';
 import { createSpinner } from '../utils/spinner.js';
+import {
+  requireConfig,
+  requireClaude,
+  extractTeamAndProjectIds,
+  displayDryRunNotice,
+  displaySummary,
+} from '../utils/index.js';
 
 /**
  * Enrich command options.
@@ -289,37 +293,20 @@ export async function enrichCommand(
   }
 
   // Load config (v2 normalized with secrets resolved from env)
-  const configResult = await loadAndResolveConfig();
-  if (!configResult.success) {
-    logger.error(configResult.error);
-    process.exit(1);
-  }
-
-  const config = configResult.data;
+  const config = await requireConfig();
 
   // Check Claude is available
-  const claudeAvailable = await isClaudeAvailable();
-  if (!claudeAvailable) {
-    logger.error('Claude CLI is not available. Please install it first: https://claude.ai/code');
-    process.exit(1);
-  }
+  await requireClaude();
 
   // Create ticket service based on provider
   const ticketService = createTicketService(config);
 
   if (dryRun) {
-    logger.info(logger.dim('[Dry run mode - no changes will be made]'));
-    console.log('');
+    displayDryRunNotice();
   }
 
-  // Get teamId based on provider type
-  const teamId = isLinearProvider(config.provider)
-    ? config.provider.config.teamId
-    : config.provider.config.projectId;
-
-  const projectId = isLinearProvider(config.provider)
-    ? config.provider.config.projectId
-    : undefined;
+  // Get teamId and projectId based on provider type
+  const { teamId, projectId } = extractTeamAndProjectIds(config);
 
   // Fetch project context if available (for Linear provider)
   let projectContext: ProjectContext | undefined;
@@ -412,19 +399,24 @@ export async function enrichCommand(
     }
 
     // Summary
-    console.log('');
-    logger.info('='.repeat(60));
-    logger.info('Enrichment Summary');
-    logger.info('='.repeat(60));
-    logger.info(`Total candidate issues: ${allCandidateIssues.length}`);
+    const stats: Array<{ label: string; value: string | number; type?: 'default' | 'success' | 'warn' | 'error' }> = [
+      { label: 'Total candidate issues', value: allCandidateIssues.length },
+    ];
+
     if (skippedCount > 0) {
-      logger.info(logger.dim(`Skipped (already enriched): ${skippedCount}`));
+      stats.push({ label: 'Skipped (already enriched)', value: skippedCount });
     }
-    logger.info(`Processed: ${issuesToProcess.length}`);
-    logger.success(`Successful: ${successCount}`);
+
+    stats.push(
+      { label: 'Processed', value: issuesToProcess.length },
+      { label: 'Successful', value: successCount, type: 'success' }
+    );
+
     if (failCount > 0) {
-      logger.error(`Failed: ${failCount}`);
+      stats.push({ label: 'Failed', value: failCount, type: 'error' });
     }
+
+    displaySummary('Enrichment Summary', stats);
 
     if (failCount > 0) {
       process.exit(1);
@@ -484,19 +476,24 @@ export async function enrichCommand(
 
     // Show summary if multiple issues were specified
     if (issueIdentifiers.length > 1) {
-      console.log('');
-      logger.info('='.repeat(60));
-      logger.info('Enrichment Summary');
-      logger.info('='.repeat(60));
-      logger.info(`Total issues: ${issueIdentifiers.length}`);
+      const stats: Array<{ label: string; value: string | number; type?: 'default' | 'success' | 'warn' | 'error' }> = [
+        { label: 'Total issues', value: issueIdentifiers.length },
+      ];
+
       if (skippedCount > 0) {
-        logger.info(logger.dim(`Skipped (already enriched): ${skippedCount}`));
+        stats.push({ label: 'Skipped (already enriched)', value: skippedCount });
       }
-      logger.info(`Processed: ${issuesToProcess.length}`);
-      logger.success(`Successful: ${successCount}`);
+
+      stats.push(
+        { label: 'Processed', value: issuesToProcess.length },
+        { label: 'Successful', value: successCount, type: 'success' }
+      );
+
       if (failCount > 0) {
-        logger.error(`Failed: ${failCount}`);
+        stats.push({ label: 'Failed', value: failCount, type: 'error' });
       }
+
+      displaySummary('Enrichment Summary', stats);
     } else {
       logger.success('\nEnrichment complete!');
     }

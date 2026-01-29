@@ -1,14 +1,13 @@
-import { loadAndResolveConfig } from '../services/config/manager.js';
 import {
   createTicketService,
   logger,
   getPriorityLabel,
-  isLinearProvider,
   filterActionableIssues,
   type NormalizedIssue,
 } from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../utils/spinner.js';
 import { formatIssueTable } from '../utils/table.js';
+import { requireConfig, extractTeamAndProjectIds } from '../utils/index.js';
 
 interface ReadyOptions {
   json?: boolean | undefined;
@@ -19,25 +18,13 @@ export async function readyCommand(options: ReadyOptions = {}): Promise<void> {
   const { json = false, all = false } = options;
 
   // Load config (v2 normalized with secrets resolved from env)
-  const configResult = await loadAndResolveConfig();
-  if (!configResult.success) {
-    logger.error(configResult.error);
-    process.exit(1);
-  }
-
-  const config = configResult.data;
+  const config = await requireConfig();
 
   // Create ticket service based on provider
   const ticketService = createTicketService(config);
 
-  // Get teamId based on provider type
-  const teamId = isLinearProvider(config.provider)
-    ? config.provider.config.teamId
-    : config.provider.config.projectId;
-
-  const projectId = isLinearProvider(config.provider)
-    ? config.provider.config.projectId
-    : undefined;
+  // Get teamId and projectId based on provider type
+  const { teamId, projectId } = extractTeamAndProjectIds(config);
 
   // Fetch issues
   const spinner = createSpinner('Fetching ready issues...').start();

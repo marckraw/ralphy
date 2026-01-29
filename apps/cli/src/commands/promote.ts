@@ -1,12 +1,16 @@
-import { loadAndResolveConfig } from '../services/config/manager.js';
 import {
   createTicketService,
   logger,
-  isLinearProvider,
   filterActionableIssues,
   type TicketService,
 } from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../utils/spinner.js';
+import {
+  requireConfig,
+  extractTeamAndProjectIds,
+  displayDryRunNotice,
+  displaySummary,
+} from '../utils/index.js';
 
 interface PromoteOptions {
   dryRun?: boolean | undefined;
@@ -63,13 +67,8 @@ export async function promoteCommand(
   const { dryRun = false, allCandidates = false } = options;
 
   // Load config (v2 normalized with secrets resolved from env)
-  const configResult = await loadAndResolveConfig();
-  if (!configResult.success) {
-    logger.error(configResult.error);
-    process.exit(1);
-  }
+  const config = await requireConfig();
 
-  const config = configResult.data;
   const candidateLabel = config.labels.candidate;
   const readyLabel = config.labels.ready;
 
@@ -82,13 +81,7 @@ export async function promoteCommand(
   if (allCandidates) {
     const spinner = createSpinner('Fetching all candidate issues...').start();
 
-    const teamId = isLinearProvider(config.provider)
-      ? config.provider.config.teamId
-      : config.provider.config.projectId;
-
-    const projectId = isLinearProvider(config.provider)
-      ? config.provider.config.projectId
-      : undefined;
+    const { teamId, projectId } = extractTeamAndProjectIds(config);
 
     const issuesResult = await ticketService.fetchIssuesByLabel({
       teamId,
@@ -121,8 +114,7 @@ export async function promoteCommand(
   }
 
   if (dryRun) {
-    logger.info(logger.dim('[Dry run mode - no changes will be made]'));
-    console.log('');
+    displayDryRunNotice();
     for (const issueId of issuesToPromote) {
       logger.info(`Would promote issue ${logger.highlight(issueId)}`);
       logger.info(`  Remove label: ${logger.highlight(candidateLabel)}`);
@@ -146,18 +138,19 @@ export async function promoteCommand(
     const skippedCount = results.filter((r) => r.skipped).length;
     const failedCount = results.filter((r) => !r.success).length;
 
-    console.log('');
-    logger.info('='.repeat(50));
-    logger.info('Promotion Summary');
-    logger.info('='.repeat(50));
-    logger.info(`Total issues: ${issuesToPromote.length}`);
-    logger.success(`Promoted: ${successCount}`);
+    const stats: Array<{ label: string; value: string | number; type?: 'default' | 'success' | 'warn' | 'error' }> = [
+      { label: 'Total issues', value: issuesToPromote.length },
+      { label: 'Promoted', value: successCount, type: 'success' },
+    ];
+
     if (skippedCount > 0) {
-      logger.warn(`Already ready: ${skippedCount}`);
+      stats.push({ label: 'Already ready', value: skippedCount, type: 'warn' });
     }
     if (failedCount > 0) {
-      logger.error(`Failed: ${failedCount}`);
+      stats.push({ label: 'Failed', value: failedCount, type: 'error' });
     }
+
+    displaySummary('Promotion Summary', stats);
 
     if (failedCount > 0) {
       process.exit(1);

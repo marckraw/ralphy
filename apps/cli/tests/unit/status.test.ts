@@ -3,11 +3,11 @@ import {
   parseHistoryRun,
   calculateHistorySummary,
   extractConfigStatus,
-  formatDuration,
   formatRelativeTime,
   formatStatusSymbol,
   type HistoryRun,
 } from '../../src/commands/status.js';
+import { formatDuration } from '../../src/utils/display-helpers.js';
 import type { RalphyConfigV2 } from '@mrck-labs/ralphy-shared';
 
 describe('status command pure functions', () => {

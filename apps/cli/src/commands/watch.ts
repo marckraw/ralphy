@@ -5,7 +5,6 @@
  * them using the Ralph Wiggum loop. Runs indefinitely until stopped via Ctrl+C.
  */
 
-import { loadAndResolveConfig } from '../services/config/manager.js';
 import {
   createTicketService,
   logger,
@@ -16,8 +15,7 @@ import {
   type RalphyConfigV2,
 } from '@mrck-labs/ralphy-shared';
 import { getContextDir, getHistoryDir } from '../services/config/paths.js';
-import { isClaudeAvailable } from '../services/claude/executor.js';
-import { runSingleIssue, formatDuration, type RunResult } from './run.js';
+import { runSingleIssue, type RunResult } from './run.js';
 import { notifySuccess, notifyFailure, notifyWarning } from '../utils/notify.js';
 import {
   prioritizeNextTask,
@@ -25,6 +23,13 @@ import {
   type CompletedTaskContext,
 } from '../services/claude/prioritizer.js';
 import { createSpinner } from '../utils/spinner.js';
+import {
+  requireConfig,
+  requireClaude,
+  extractTeamAndProjectIds,
+  displayDryRunNotice,
+  formatDuration,
+} from '../utils/index.js';
 
 /**
  * Watch command options.
@@ -148,7 +153,7 @@ function displayBanner(
 /**
  * Displays the session summary on shutdown.
  */
-function displaySummary(stats: SessionStats): void {
+function displaySessionSummary(stats: SessionStats): void {
   const duration = Date.now() - stats.startTime;
 
   console.log('');
@@ -169,13 +174,7 @@ async function fetchReadyIssues(
   ticketService: TicketService,
   config: RalphyConfigV2
 ): Promise<NormalizedIssue[] | null> {
-  const teamId = isLinearProvider(config.provider)
-    ? config.provider.config.teamId
-    : config.provider.config.projectId;
-
-  const projectId = isLinearProvider(config.provider)
-    ? config.provider.config.projectId
-    : undefined;
+  const { teamId, projectId } = extractTeamAndProjectIds(config);
 
   const issuesResult = await ticketService.fetchIssuesByLabel({
     teamId,
@@ -236,21 +235,11 @@ export async function watchCommand(options: WatchOptions): Promise<void> {
   }
 
   // Load config (with secrets resolved from env)
-  const configResult = await loadAndResolveConfig();
-  if (!configResult.success) {
-    logger.error(configResult.error);
-    process.exit(1);
-  }
-
-  const config = configResult.data;
+  const config = await requireConfig();
   const maxIterations = options.maxIterations ?? config.claude.maxIterations;
 
   // Check Claude is available
-  const claudeAvailable = await isClaudeAvailable();
-  if (!claudeAvailable) {
-    logger.error('Claude CLI is not available. Please install it first: https://claude.ai/code');
-    process.exit(1);
-  }
+  await requireClaude();
 
   // Create ticket service
   const ticketService = createTicketService(config);
@@ -265,8 +254,7 @@ export async function watchCommand(options: WatchOptions): Promise<void> {
   displayBanner(config, interval, maxIterations);
 
   if (dryRun) {
-    logger.info(logger.dim('[Dry run mode - no changes will be made]'));
-    console.log('');
+    displayDryRunNotice();
   }
 
   // Initialize session stats
@@ -475,7 +463,7 @@ export async function watchCommand(options: WatchOptions): Promise<void> {
   }
 
   // Display session summary
-  displaySummary(stats);
+  displaySessionSummary(stats);
 
   // Reset state for potential future runs in same process
   resetWatchState();
