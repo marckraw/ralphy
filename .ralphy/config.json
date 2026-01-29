@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "provider": {
+    "type": "linear",
+    "config": {
+      "projectId": "2311423a-64db-41a7-bd44-7ddde2792b33",
+      "projectName": "ralphy",
+      "teamId": "459972b1-6f24-4177-8321-b2aceac3a426"
+    }
+  },
+  "labels": {
+    "ready": "ralph-ready",
+    "candidate": "ralph-candidate",
+    "enriched": "ralph-enriched",
+    "prFeedback": "ralph-pr-feedback"
+  },
+  "claude": {
+    "maxIterations": 20,
+    "timeout": 1200000,
+    "model": "opus"
+  },
+  "integrations": {
+    "github": {
+      "owner": "marckraw",
+      "repo": "ralphy"
+    }
+  }
+}

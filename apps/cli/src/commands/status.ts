@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { execa } from 'execa';
-import { loadConfigV2, isInitialized } from '../services/config/manager.js';
+import { loadAndResolveConfig, isInitialized } from '../services/config/manager.js';
 import { getHistoryDir } from '../services/config/paths.js';
 import { isClaudeAvailable } from '../services/claude/executor.js';
 import {
@@ -483,7 +483,7 @@ export async function statusCommand(options: StatusOptions = {}): Promise<void> 
 
   // If initialized, gather more data
   if (initialized) {
-    const configResult = await loadConfigV2();
+    const configResult = await loadAndResolveConfig();
 
     if (configResult.success) {
       const config = configResult.data;

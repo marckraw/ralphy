@@ -104,7 +104,7 @@ export function initializeGitHubClientFromConfig(configToken?: string): Result<O
   if (!token) {
     return {
       success: false,
-      error: 'No GitHub token found. Set GITHUB_TOKEN environment variable or configure token in .ralphy/config.json',
+      error: 'No GitHub token found. Set GITHUB_TOKEN in your .env file or run \'ralphy init\' to configure.',
     };
   }
 

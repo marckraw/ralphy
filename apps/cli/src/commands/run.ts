@@ -8,7 +8,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { loadConfigV2 } from '../services/config/manager.js';
+import { loadAndResolveConfig } from '../services/config/manager.js';
 import {
   createTicketService,
   logger,
@@ -533,8 +533,8 @@ export async function runCommand(
     process.exit(1);
   }
 
-  // Load config (v2 normalized)
-  const configResult = await loadConfigV2();
+  // Load config (v2 normalized with secrets resolved from env)
+  const configResult = await loadAndResolveConfig();
   if (!configResult.success) {
     logger.error(configResult.error);
     process.exit(1);

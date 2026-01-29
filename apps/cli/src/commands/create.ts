@@ -5,7 +5,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execa } from 'execa';
-import { loadConfigV2 } from '../services/config/manager.js';
+import { loadAndResolveConfig } from '../services/config/manager.js';
 import {
   createTicketService,
   logger,
@@ -312,8 +312,8 @@ export async function createCommand(
 ): Promise<void> {
   const { multi = false, dryRun = false, verbose = false, status } = options;
 
-  // Load config
-  const configResult = await loadConfigV2();
+  // Load config (with secrets resolved from env)
+  const configResult = await loadAndResolveConfig();
   if (!configResult.success) {
     logger.error(configResult.error);
     process.exit(1);

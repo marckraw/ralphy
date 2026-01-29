@@ -5,7 +5,7 @@
  * them using the Ralph Wiggum loop. Runs indefinitely until stopped via Ctrl+C.
  */
 
-import { loadConfigV2 } from '../services/config/manager.js';
+import { loadAndResolveConfig } from '../services/config/manager.js';
 import {
   createTicketService,
   logger,
@@ -235,8 +235,8 @@ export async function watchCommand(options: WatchOptions): Promise<void> {
     process.exit(1);
   }
 
-  // Load config
-  const configResult = await loadConfigV2();
+  // Load config (with secrets resolved from env)
+  const configResult = await loadAndResolveConfig();
   if (!configResult.success) {
     logger.error(configResult.error);
     process.exit(1);
