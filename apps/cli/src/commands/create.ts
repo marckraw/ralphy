@@ -5,16 +5,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { execa } from 'execa';
-import { loadAndResolveConfig } from '../services/config/manager.js';
 import {
   createTicketService,
   logger,
-  isLinearProvider,
   type ParsedTask,
   type TicketService,
   type CreatedIssue,
 } from '@mrck-labs/ralphy-shared';
-import { isClaudeAvailable } from '../services/claude/executor.js';
 import {
   buildTaskParserPrompt,
   parseTasksFromOutput,
@@ -23,6 +20,13 @@ import {
   buildTaskParserClaudeArgs,
 } from '../services/claude/task-parser.js';
 import { createSpinner } from '../utils/spinner.js';
+import {
+  requireConfig,
+  requireClaude,
+  extractTeamAndProjectIds,
+  displayDryRunNotice,
+  displaySummary,
+} from '../utils/index.js';
 
 /**
  * Checks if a path is a directory.
@@ -313,26 +317,13 @@ export async function createCommand(
   const { multi = false, dryRun = false, verbose = false, status } = options;
 
   // Load config (with secrets resolved from env)
-  const configResult = await loadAndResolveConfig();
-  if (!configResult.success) {
-    logger.error(configResult.error);
-    process.exit(1);
-  }
-
-  const config = configResult.data;
+  const config = await requireConfig();
 
   // Check Claude is available
-  const claudeAvailable = await isClaudeAvailable();
-  if (!claudeAvailable) {
-    logger.error(
-      'Claude CLI is not available. Please install it first: https://claude.ai/code'
-    );
-    process.exit(1);
-  }
+  await requireClaude();
 
   if (dryRun) {
-    logger.info(logger.dim('[Dry run mode - no issues will be created]'));
-    console.log('');
+    displayDryRunNotice();
   }
 
   // Determine if input is a directory or file
@@ -414,13 +405,7 @@ export async function createCommand(
   const ticketService = createTicketService(config);
 
   // Get team and project IDs
-  const teamId = isLinearProvider(config.provider)
-    ? config.provider.config.teamId
-    : config.provider.config.projectId;
-
-  const projectId = isLinearProvider(config.provider)
-    ? config.provider.config.projectId
-    : undefined;
+  const { teamId, projectId } = extractTeamAndProjectIds(config);
 
   // Create issues
   const created = await createIssuesFromTasks(
@@ -434,41 +419,41 @@ export async function createCommand(
   );
 
   // Summary
-  console.log('');
-  logger.info('='.repeat(60));
-  logger.info('Summary');
-  logger.info('='.repeat(60));
+  const stats = [];
 
   if (isDir) {
-    logger.info(`Files processed: ${filesToProcess.length}`);
     const successfulFiles = fileResults.filter((r) => !r.error).length;
     const failedFiles = fileResults.filter((r) => r.error).length;
+
+    stats.push({ label: 'Files processed', value: filesToProcess.length });
     if (failedFiles > 0) {
-      logger.warn(`Files failed: ${failedFiles}`);
+      stats.push({ label: 'Files failed', value: failedFiles, type: 'warn' as const });
     }
-    logger.info(`Files successful: ${successfulFiles}`);
+    stats.push({ label: 'Files successful', value: successfulFiles });
   }
 
-  logger.info(`Tasks extracted: ${allTasks.length}`);
+  stats.push({ label: 'Tasks extracted', value: allTasks.length });
 
   if (dryRun) {
-    logger.info(logger.dim(`[Dry run] Would have created ${allTasks.length} issue(s)`));
+    stats.push({ label: 'Would have created', value: `${allTasks.length} issue(s)` });
   } else {
-    logger.success(`Issues created: ${created.length}`);
-
-    if (created.length > 0) {
-      console.log('');
-      logger.info('Created issues:');
-      for (const issue of created) {
-        logger.info(`  ${issue.identifier}: ${issue.title}`);
-        if (issue.url) {
-          logger.info(logger.dim(`    ${issue.url}`));
-        }
-      }
-    }
+    stats.push({ label: 'Issues created', value: created.length, type: 'success' as const });
 
     if (created.length < allTasks.length) {
-      logger.warn(`Failed to create: ${allTasks.length - created.length}`);
+      stats.push({ label: 'Failed to create', value: allTasks.length - created.length, type: 'warn' as const });
+    }
+  }
+
+  displaySummary('Summary', stats);
+
+  if (!dryRun && created.length > 0) {
+    console.log('');
+    logger.info('Created issues:');
+    for (const issue of created) {
+      logger.info(`  ${issue.identifier}: ${issue.title}`);
+      if (issue.url) {
+        logger.info(logger.dim(`    ${issue.url}`));
+      }
     }
   }
 }

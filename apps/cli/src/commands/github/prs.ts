@@ -1,4 +1,3 @@
-import { loadAndResolveConfig } from '../../services/config/manager.js';
 import {
   initializeGitHubClientFromConfig,
   getGitHubClient,
@@ -6,6 +5,7 @@ import {
 import { fetchPullRequests } from '../../services/github/pr-fetcher.js';
 import { logger } from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../../utils/spinner.js';
+import { requireConfig, requireGitHubIntegration } from '../../utils/index.js';
 import chalk from 'chalk';
 
 export interface PrsCommandOptions {
@@ -17,22 +17,11 @@ export async function prsCommand(options: PrsCommandOptions = {}): Promise<void>
   const { state = 'open', json = false } = options;
 
   // Load config (with secrets resolved from env)
-  const configResult = await loadAndResolveConfig();
-  if (!configResult.success) {
-    logger.error(configResult.error);
-    return;
-  }
-
-  const config = configResult.data;
+  const config = await requireConfig();
 
   // Check GitHub integration
-  if (!config.integrations?.github) {
-    logger.error('GitHub integration not configured.');
-    logger.info('Run `ralphy init` to configure GitHub integration.');
-    return;
-  }
-
-  const { owner, repo, token } = config.integrations.github;
+  const github = requireGitHubIntegration(config);
+  const { owner, repo, token } = github;
 
   // Initialize GitHub client
   const clientResult = initializeGitHubClientFromConfig(token);

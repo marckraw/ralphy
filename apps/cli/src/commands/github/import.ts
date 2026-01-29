@@ -1,5 +1,4 @@
 import { execa } from 'execa';
-import { loadAndResolveConfig } from '../../services/config/manager.js';
 import {
   initializeGitHubClientFromConfig,
   getGitHubClient,
@@ -15,14 +14,20 @@ import {
   isPRParsingComplete,
   formatTaskDescription,
 } from '../../services/claude/pr-comment-parser.js';
-import { isClaudeAvailable } from '../../services/claude/executor.js';
 import {
   createTicketService,
   logger,
-  isLinearProvider,
   type CreatedIssue,
 } from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../../utils/spinner.js';
+import {
+  requireConfig,
+  requireClaude,
+  requireGitHubIntegration,
+  extractTeamAndProjectIds,
+  displayDryRunNotice,
+  displaySummary,
+} from '../../utils/index.js';
 import chalk from 'chalk';
 
 export interface ImportCommandOptions {
@@ -44,33 +49,17 @@ export async function importCommand(
   }
 
   // Load config (with secrets resolved from env)
-  const configResult = await loadAndResolveConfig();
-  if (!configResult.success) {
-    logger.error(configResult.error);
-    return;
-  }
-
-  const config = configResult.data;
+  const config = await requireConfig();
 
   // Check GitHub integration
-  if (!config.integrations?.github) {
-    logger.error('GitHub integration not configured.');
-    logger.info('Run `ralphy init` to configure GitHub integration.');
-    return;
-  }
-
-  const { owner, repo, token } = config.integrations.github;
+  const github = requireGitHubIntegration(config);
+  const { owner, repo, token } = github;
 
   // Check Claude is available
-  const claudeAvailable = await isClaudeAvailable();
-  if (!claudeAvailable) {
-    logger.error('Claude CLI is not available. Please install it first: https://claude.ai/code');
-    return;
-  }
+  await requireClaude();
 
   if (dryRun) {
-    logger.info(chalk.dim('[Dry run mode - no issues will be created]'));
-    console.log('');
+    displayDryRunNotice();
   }
 
   // Initialize GitHub client
@@ -160,14 +149,7 @@ export async function importCommand(
   // Create issues
   logger.info('');
   const ticketService = createTicketService(config);
-
-  const teamId = isLinearProvider(config.provider)
-    ? config.provider.config.teamId
-    : config.provider.config.projectId;
-
-  const projectId = isLinearProvider(config.provider)
-    ? config.provider.config.projectId
-    : undefined;
+  const { teamId, projectId } = extractTeamAndProjectIds(config);
 
   const created = await createIssuesFromPRTasks(
     tasks,
@@ -181,13 +163,13 @@ export async function importCommand(
   );
 
   // Summary
-  logger.info('');
-  logger.info('='.repeat(60));
-  logger.info('Summary');
-  logger.info('='.repeat(60));
-  logger.info(`PR: #${pr.number} - ${pr.title}`);
-  logger.info(`Comments analyzed: ${actionableComments.length}`);
-  logger.success(`Issues created: ${created.length}`);
+  const stats = [
+    { label: 'PR', value: `#${pr.number} - ${pr.title}` },
+    { label: 'Comments analyzed', value: actionableComments.length },
+    { label: 'Issues created', value: created.length, type: 'success' as const },
+  ];
+
+  displaySummary('Summary', stats);
 
   if (created.length > 0) {
     logger.info('');

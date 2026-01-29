@@ -1,14 +1,13 @@
-import { loadAndResolveConfig } from '../services/config/manager.js';
 import {
   createTicketService,
   logger,
   getPriorityLabel,
-  isLinearProvider,
   filterActionableIssues,
   type NormalizedIssue,
 } from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../utils/spinner.js';
 import { formatIssueTable } from '../utils/table.js';
+import { requireConfig, extractTeamAndProjectIds } from '../utils/index.js';
 
 interface CandidatesOptions {
   json?: boolean | undefined;
@@ -21,13 +20,8 @@ export async function candidatesCommand(options: CandidatesOptions = {}): Promis
   logger.debug('Starting candidates command');
 
   // Load config (v2 normalized with secrets resolved from env)
-  const configResult = await loadAndResolveConfig();
-  if (!configResult.success) {
-    logger.error(configResult.error);
-    process.exit(1);
-  }
+  const config = await requireConfig();
 
-  const config = configResult.data;
   logger.debug(`Provider type: ${config.provider.type}`);
   logger.debug(`Candidate label: ${config.labels.candidate}`);
 
@@ -35,14 +29,8 @@ export async function candidatesCommand(options: CandidatesOptions = {}): Promis
   const ticketService = createTicketService(config);
   logger.debug(`Ticket service created for provider: ${ticketService.provider}`);
 
-  // Get teamId based on provider type
-  const teamId = isLinearProvider(config.provider)
-    ? config.provider.config.teamId
-    : config.provider.config.projectId;
-
-  const projectId = isLinearProvider(config.provider)
-    ? config.provider.config.projectId
-    : undefined;
+  // Get teamId and projectId based on provider type
+  const { teamId, projectId } = extractTeamAndProjectIds(config);
 
   logger.debug(`Team/Project ID: ${teamId}`);
   logger.debug(`Project ID filter: ${projectId ?? 'none'}`);

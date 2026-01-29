@@ -8,18 +8,16 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { loadAndResolveConfig } from '../services/config/manager.js';
 import {
   createTicketService,
   logger,
-  isLinearProvider,
   isIssueActionable,
   type NormalizedIssue,
   type TicketService,
   type RalphyConfigV2,
 } from '@mrck-labs/ralphy-shared';
 import { getContextDir, getHistoryDir, ensureDir } from '../services/config/paths.js';
-import { executeClaude, isClaudeAvailable } from '../services/claude/executor.js';
+import { executeClaude } from '../services/claude/executor.js';
 import { formatToolActivity, formatStats, type ExecutionStats } from '../services/claude/stream-parser.js';
 import { analyzeOutput } from '../services/claude/completion.js';
 import { buildPrompt, buildInitialProgressContent } from '../services/claude/prompt-builder.js';
@@ -31,6 +29,14 @@ import {
   formatPrioritizationDecision,
   type CompletedTaskContext,
 } from '../services/claude/prioritizer.js';
+import {
+  requireConfig,
+  requireClaude,
+  extractTeamAndProjectIds,
+  displayDryRunNotice,
+  displaySummary,
+  formatDuration,
+} from '../utils/index.js';
 
 /**
  * Emergency stop state for graceful shutdown.
@@ -204,23 +210,6 @@ async function gitCommit(identifier: string, title: string): Promise<boolean> {
     logger.warn(`Failed to commit: ${err instanceof Error ? err.message : 'Unknown error'}`);
     return false;
   }
-}
-
-/**
- * Formats a duration in milliseconds to a human-readable string.
- * Exported for use by the watch command.
- */
-export function formatDuration(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-
-  if (hours > 0) {
-    return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-  } else if (minutes > 0) {
-    return `${minutes}m ${seconds % 60}s`;
-  }
-  return `${seconds}s`;
 }
 
 /**
@@ -534,21 +523,11 @@ export async function runCommand(
   }
 
   // Load config (v2 normalized with secrets resolved from env)
-  const configResult = await loadAndResolveConfig();
-  if (!configResult.success) {
-    logger.error(configResult.error);
-    process.exit(1);
-  }
-
-  const config = configResult.data;
+  const config = await requireConfig();
   const maxIterations = options.maxIterations ?? config.claude.maxIterations;
 
   // Check Claude is available
-  const claudeAvailable = await isClaudeAvailable();
-  if (!claudeAvailable) {
-    logger.error('Claude CLI is not available. Please install it first: https://claude.ai/code');
-    process.exit(1);
-  }
+  await requireClaude();
 
   // Create ticket service based on provider
   const ticketService = createTicketService(config);
@@ -562,13 +541,7 @@ export async function runCommand(
     // Fetch all issues with ralph-ready label
     const spinner = createSpinner('Fetching ready issues...').start();
 
-    const teamId = isLinearProvider(config.provider)
-      ? config.provider.config.teamId
-      : config.provider.config.projectId;
-
-    const projectId = isLinearProvider(config.provider)
-      ? config.provider.config.projectId
-      : undefined;
+    const { teamId, projectId } = extractTeamAndProjectIds(config);
 
     const issuesResult = await ticketService.fetchIssuesByLabel({
       teamId,
@@ -650,9 +623,7 @@ export async function runCommand(
 
   // Dry run mode - just show what would be processed
   if (dryRun) {
-    console.log('');
-    logger.info(logger.dim('[Dry run mode - no changes will be made]'));
-    console.log('');
+    displayDryRunNotice();
     logger.info('='.repeat(60));
     logger.info('Ralph Wiggum Dry Run Preview');
     logger.info('='.repeat(60));
@@ -804,17 +775,26 @@ export async function runCommand(
     const skippedByStop = issuesToProcess.length - results.length;
     const stoppedEarly = isEmergencyStopRequested();
 
-    console.log('\n');
-    logger.info(`${'='.repeat(60)}`);
-    logger.info(`Ralph Wiggum Batch Summary${stoppedEarly ? ' (Emergency Stop)' : ''}`);
-    logger.info(`${'='.repeat(60)}`);
-    logger.info(`Total issues processed: ${results.length}${skippedByStop > 0 ? ` (${skippedByStop} skipped due to emergency stop)` : ''}`);
-    logger.success(`Completed: ${completed}`);
-    if (maxIter > 0) logger.warn(`Max iterations reached: ${maxIter}`);
-    if (errors > 0) logger.error(`Errors: ${errors}`);
-    if (skippedByStop > 0) logger.warn(`Skipped (emergency stop): ${skippedByStop}`);
-    logger.info(`Total duration: ${formatDuration(batchDuration)}`);
-    logger.info(`Total iterations: ${results.reduce((sum, r) => sum + r.iterations, 0)}`);
+    const stats: Array<{ label: string; value: string | number; type?: 'default' | 'success' | 'warn' | 'error' }> = [
+      { label: `Total issues processed`, value: `${results.length}${skippedByStop > 0 ? ` (${skippedByStop} skipped due to emergency stop)` : ''}` },
+      { label: 'Completed', value: completed, type: 'success' },
+    ];
+
+    if (maxIter > 0) {
+      stats.push({ label: 'Max iterations reached', value: maxIter, type: 'warn' });
+    }
+    if (errors > 0) {
+      stats.push({ label: 'Errors', value: errors, type: 'error' });
+    }
+    if (skippedByStop > 0) {
+      stats.push({ label: 'Skipped (emergency stop)', value: skippedByStop, type: 'warn' });
+    }
+    stats.push(
+      { label: 'Total duration', value: formatDuration(batchDuration) },
+      { label: 'Total iterations', value: results.reduce((sum, r) => sum + r.iterations, 0) }
+    );
+
+    displaySummary(`Ralph Wiggum Batch Summary${stoppedEarly ? ' (Emergency Stop)' : ''}`, stats);
 
     console.log('\nResults by issue:');
     for (const result of results) {
@@ -847,3 +827,6 @@ export async function runCommand(
     }
   }
 }
+
+// Re-export for backwards compatibility with watch.ts
+export { formatDuration } from '../utils/display-helpers.js';
