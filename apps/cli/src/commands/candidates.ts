@@ -1,4 +1,4 @@
-import { loadConfigV2 } from '../services/config/manager.js';
+import { loadAndResolveConfig } from '../services/config/manager.js';
 import {
   createTicketService,
   logger,
@@ -20,8 +20,8 @@ export async function candidatesCommand(options: CandidatesOptions = {}): Promis
 
   logger.debug('Starting candidates command');
 
-  // Load config (v2 normalized)
-  const configResult = await loadConfigV2();
+  // Load config (v2 normalized with secrets resolved from env)
+  const configResult = await loadAndResolveConfig();
   if (!configResult.success) {
     logger.error(configResult.error);
     process.exit(1);

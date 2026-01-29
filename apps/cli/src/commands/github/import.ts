@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import { loadConfigV2 } from '../../services/config/manager.js';
+import { loadAndResolveConfig } from '../../services/config/manager.js';
 import {
   initializeGitHubClientFromConfig,
   getGitHubClient,
@@ -43,8 +43,8 @@ export async function importCommand(
     return;
   }
 
-  // Load config
-  const configResult = await loadConfigV2();
+  // Load config (with secrets resolved from env)
+  const configResult = await loadAndResolveConfig();
   if (!configResult.success) {
     logger.error(configResult.error);
     return;

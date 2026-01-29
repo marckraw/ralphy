@@ -1,4 +1,4 @@
-import { loadConfigV2 } from '../../services/config/manager.js';
+import { loadAndResolveConfig } from '../../services/config/manager.js';
 import {
   initializeGitHubClientFromConfig,
   getGitHubClient,
@@ -16,8 +16,8 @@ export interface PrsCommandOptions {
 export async function prsCommand(options: PrsCommandOptions = {}): Promise<void> {
   const { state = 'open', json = false } = options;
 
-  // Load config
-  const configResult = await loadConfigV2();
+  // Load config (with secrets resolved from env)
+  const configResult = await loadAndResolveConfig();
   if (!configResult.success) {
     logger.error(configResult.error);
     return;

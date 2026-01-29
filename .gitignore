@@ -26,8 +26,7 @@ npm-debug.log*
 # Test coverage
 coverage/
 
-# Ralphy local config (contains API keys)
-.ralphy/
+# Ralphy local config - now safe to commit (secrets are in .env)
 
 # Claude Code local data
 .claude/

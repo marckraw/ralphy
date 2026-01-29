@@ -1,18 +1,21 @@
 import inquirer from 'inquirer';
 import { initializeClient, validateApiKey } from '../services/linear/client.js';
 import { fetchTeams, fetchProjects } from '../services/linear/projects.js';
-import { isInitialized, saveConfigV2, loadConfigV2, updateConfigV2 } from '../services/config/manager.js';
+import { isInitialized, saveStoredConfig, loadAndResolveConfig, updateStoredConfig } from '../services/config/manager.js';
 import { createRalphyStructure } from '../services/config/paths.js';
+import { writeSecretsToEnv, type EnvSecrets } from '../services/config/env-writer.js';
 import {
   validateGitHubToken,
   validateRepoAccess,
 } from '../services/github/client.js';
 import {
   logger,
-  createLinearConfigV2,
-  createJiraConfigV2,
+  createLinearConfigStored,
+  createJiraConfigStored,
+  ENV_VARS,
   type NormalizedTeam,
   type NormalizedProject,
+  type RalphyConfigStored,
   type RalphyConfigV2,
 } from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../utils/spinner.js';
@@ -44,7 +47,7 @@ export async function initCommand(options: InitOptions = {}): Promise<void> {
   }
 
   // Load existing config to check what's configured
-  const configResult = await loadConfigV2();
+  const configResult = await loadAndResolveConfig();
   if (!configResult.success) {
     logger.error(`Failed to load config: ${configResult.error}`);
     logger.info('Run `ralphy init --force` to reconfigure.');
@@ -200,13 +203,15 @@ async function selectProvider(): Promise<Provider> {
   return provider;
 }
 
-async function initLinear(): Promise<RalphyConfigV2 | null> {
+async function initLinear(): Promise<RalphyConfigStored | null> {
   // Get Linear API key
-  const apiKey = await getLinearApiKey();
-  if (!apiKey) {
+  const apiKeyInfo = await getLinearApiKey();
+  if (!apiKeyInfo) {
     logger.error('Linear API key is required.');
     return null;
   }
+
+  const { apiKey, isFromEnv } = apiKeyInfo;
 
   // Validate API key
   const validatingSpinner = createSpinner('Validating Linear API key...').start();
@@ -236,8 +241,20 @@ async function initLinear(): Promise<RalphyConfigV2 | null> {
   const structureSpinner = createSpinner('Creating Ralphy configuration...').start();
   await createRalphyStructure();
 
-  const config = createLinearConfigV2(apiKey, project.id, project.name, team.id);
-  const result = await saveConfigV2(config);
+  // Write API key to .env file (unless it came from env already)
+  if (!isFromEnv) {
+    const secrets: EnvSecrets = { LINEAR_API_KEY: apiKey };
+    const envResult = await writeSecretsToEnv(secrets);
+    if (!envResult.success) {
+      structureSpinner.fail('Failed to write secrets to .env');
+      logger.error(envResult.error);
+      return null;
+    }
+  }
+
+  // Save config WITHOUT the API key (it's in .env)
+  const config = createLinearConfigStored(project.id, project.name, team.id);
+  const result = await saveStoredConfig(config);
   if (!result.success) {
     structureSpinner.fail('Failed to create configuration');
     logger.error(result.error);
@@ -249,18 +266,23 @@ async function initLinear(): Promise<RalphyConfigV2 | null> {
   logger.info(`Provider: ${logger.highlight('Linear')}`);
   logger.info(`Project: ${logger.highlight(project.name)}`);
   logger.info(`Team: ${logger.highlight(team.name)}`);
+  if (!isFromEnv) {
+    logger.info(`API key: ${logger.dim('Stored in .env file')}`);
+  } else {
+    logger.info(`API key: ${logger.dim(`Using ${ENV_VARS.LINEAR_API_KEY} from environment`)}`);
+  }
 
   return config;
 }
 
-async function initJira(): Promise<RalphyConfigV2 | null> {
+async function initJira(): Promise<RalphyConfigStored | null> {
   // Get Jira credentials
   const credentials = await getJiraCredentials();
   if (!credentials) {
     return null;
   }
 
-  const { host, email, apiToken } = credentials;
+  const { host, email, apiToken, isFromEnv } = credentials;
 
   // Validate credentials
   const validatingSpinner = createSpinner('Validating Jira credentials...').start();
@@ -294,15 +316,26 @@ async function initJira(): Promise<RalphyConfigV2 | null> {
   const structureSpinner = createSpinner('Creating Ralphy configuration...').start();
   await createRalphyStructure();
 
-  const config = createJiraConfigV2(
+  // Write API token to .env file (unless it came from env already)
+  if (!isFromEnv) {
+    const secrets: EnvSecrets = { JIRA_API_TOKEN: apiToken };
+    const envResult = await writeSecretsToEnv(secrets);
+    if (!envResult.success) {
+      structureSpinner.fail('Failed to write secrets to .env');
+      logger.error(envResult.error);
+      return null;
+    }
+  }
+
+  // Save config WITHOUT the API token (it's in .env)
+  const config = createJiraConfigStored(
     host,
     email,
-    apiToken,
     project.key ?? '',
     project.id,
     project.name
   );
-  const result = await saveConfigV2(config);
+  const result = await saveStoredConfig(config);
   if (!result.success) {
     structureSpinner.fail('Failed to create configuration');
     logger.error(result.error);
@@ -313,6 +346,11 @@ async function initJira(): Promise<RalphyConfigV2 | null> {
   logger.success('\nRalphy initialized successfully!');
   logger.info(`Provider: ${logger.highlight('Jira Cloud')}`);
   logger.info(`Project: ${logger.highlight(project.name)} (${project.key})`);
+  if (!isFromEnv) {
+    logger.info(`API token: ${logger.dim('Stored in .env file')}`);
+  } else {
+    logger.info(`API token: ${logger.dim(`Using ${ENV_VARS.JIRA_API_TOKEN} from environment`)}`);
+  }
 
   return config;
 }
@@ -331,11 +369,13 @@ async function configureGitHubIntegration(): Promise<void> {
   logger.info('\nConfiguring GitHub Integration...');
 
   // Get token
-  const token = await getGitHubToken();
-  if (!token) {
+  const tokenInfo = await getGitHubToken();
+  if (!tokenInfo) {
     logger.error('GitHub token is required for PR integration.');
     return;
   }
+
+  const { token, isFromEnv } = tokenInfo;
 
   // Validate token
   const validatingSpinner = createSpinner('Validating GitHub token...').start();
@@ -364,14 +404,22 @@ async function configureGitHubIntegration(): Promise<void> {
   // Update config
   const updateSpinner = createSpinner('Updating configuration...').start();
 
-  // Determine if we should store the token (only if not from env)
-  const isFromEnv = Boolean(process.env['GITHUB_TOKEN']);
-  const tokenToStore = isFromEnv ? undefined : token;
+  // Write token to .env file (unless it came from env already)
+  if (!isFromEnv) {
+    const secrets: EnvSecrets = { GITHUB_TOKEN: token };
+    const envResult = await writeSecretsToEnv(secrets);
+    if (!envResult.success) {
+      updateSpinner.fail('Failed to write secrets to .env');
+      logger.error(envResult.error);
+      return;
+    }
+  }
 
-  const updateResult = await updateConfigV2({
+  // Update config WITHOUT the token (it's in .env or env var)
+  const updateResult = await updateStoredConfig({
     integrations: {
       github: {
-        token: tokenToStore,
+        // Don't store the token in config - it's in .env
         owner: repoInfo.owner,
         repo: repoInfo.repo,
       },
@@ -388,19 +436,26 @@ async function configureGitHubIntegration(): Promise<void> {
   logger.success('\nGitHub integration added!');
   logger.info(`Repository: ${logger.highlight(`${repoInfo.owner}/${repoInfo.repo}`)}`);
   if (isFromEnv) {
-    logger.info(`Token: ${logger.dim('Using GITHUB_TOKEN environment variable')}`);
+    logger.info(`Token: ${logger.dim(`Using ${ENV_VARS.GITHUB_TOKEN} from environment`)}`);
+  } else {
+    logger.info(`Token: ${logger.dim('Stored in .env file')}`);
   }
   logger.info(`\nYou can now use:`);
   logger.info(`  ${logger.formatCommand('ralphy github prs')} - List PRs with review comments`);
   logger.info(`  ${logger.formatCommand('ralphy github import <pr>')} - Import PR comments as tasks`);
 }
 
-async function getGitHubToken(): Promise<string | null> {
+interface TokenInfo {
+  token: string;
+  isFromEnv: boolean;
+}
+
+async function getGitHubToken(): Promise<TokenInfo | null> {
   // First check environment variable
-  const envToken = process.env['GITHUB_TOKEN'];
+  const envToken = process.env[ENV_VARS.GITHUB_TOKEN];
   if (envToken) {
-    logger.info('Using GitHub token from GITHUB_TOKEN environment variable');
-    return envToken;
+    logger.info(`Using GitHub token from ${ENV_VARS.GITHUB_TOKEN} environment variable`);
+    return { token: envToken, isFromEnv: true };
   }
 
   // Otherwise prompt for it
@@ -419,7 +474,7 @@ async function getGitHubToken(): Promise<string | null> {
     },
   ]);
 
-  return token.trim();
+  return { token: token.trim(), isFromEnv: false };
 }
 
 interface RepositoryInfo {
@@ -506,12 +561,17 @@ async function detectGitHubRepo(): Promise<RepositoryInfo | null> {
 
 // ============ Linear Helper Functions ============
 
-async function getLinearApiKey(): Promise<string | null> {
+interface ApiKeyInfo {
+  apiKey: string;
+  isFromEnv: boolean;
+}
+
+async function getLinearApiKey(): Promise<ApiKeyInfo | null> {
   // First check environment variable
-  const envKey = process.env['LINEAR_API_KEY'];
+  const envKey = process.env[ENV_VARS.LINEAR_API_KEY];
   if (envKey) {
-    logger.info('Using Linear API key from LINEAR_API_KEY environment variable');
-    return envKey;
+    logger.info(`Using Linear API key from ${ENV_VARS.LINEAR_API_KEY} environment variable`);
+    return { apiKey: envKey, isFromEnv: true };
   }
 
   // Otherwise prompt for it
@@ -530,7 +590,7 @@ async function getLinearApiKey(): Promise<string | null> {
     },
   ]);
 
-  return apiKey.trim();
+  return { apiKey: apiKey.trim(), isFromEnv: false };
 }
 
 async function selectLinearTeam(): Promise<NormalizedTeam | null> {
@@ -617,21 +677,22 @@ interface JiraCredentials {
   host: string;
   email: string;
   apiToken: string;
+  isFromEnv: boolean;
 }
 
 async function getJiraCredentials(): Promise<JiraCredentials | null> {
   // Check environment variables first
   const envHost = process.env['JIRA_HOST'];
   const envEmail = process.env['JIRA_EMAIL'];
-  const envToken = process.env['JIRA_API_TOKEN'];
+  const envToken = process.env[ENV_VARS.JIRA_API_TOKEN];
 
   if (envHost && envEmail && envToken) {
     logger.info('Using Jira credentials from environment variables');
-    return { host: envHost, email: envEmail, apiToken: envToken };
+    return { host: envHost, email: envEmail, apiToken: envToken, isFromEnv: true };
   }
 
   // Prompt for credentials
-  const answers = await inquirer.prompt<JiraCredentials>([
+  const answers = await inquirer.prompt<{ host: string; email: string; apiToken: string }>([
     {
       type: 'input',
       name: 'host',
@@ -677,7 +738,7 @@ async function getJiraCredentials(): Promise<JiraCredentials | null> {
     },
   ]);
 
-  return answers;
+  return { ...answers, isFromEnv: false };
 }
 
 async function selectJiraProject(client: Version3Client): Promise<NormalizedProject | null> {

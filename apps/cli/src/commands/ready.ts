@@ -1,4 +1,4 @@
-import { loadConfigV2 } from '../services/config/manager.js';
+import { loadAndResolveConfig } from '../services/config/manager.js';
 import {
   createTicketService,
   logger,
@@ -18,8 +18,8 @@ interface ReadyOptions {
 export async function readyCommand(options: ReadyOptions = {}): Promise<void> {
   const { json = false, all = false } = options;
 
-  // Load config (v2 normalized)
-  const configResult = await loadConfigV2();
+  // Load config (v2 normalized with secrets resolved from env)
+  const configResult = await loadAndResolveConfig();
   if (!configResult.success) {
     logger.error(configResult.error);
     process.exit(1);
