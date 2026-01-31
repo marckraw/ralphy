@@ -1,0 +1,37 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "typescript": {
+      "detected": true,
+      "configPath": "tsconfig.json",
+      "settings": {
+        "strict": true,
+        "target": "ES2022"
+      }
+    },
+    "eslint": {
+      "detected": false
+    },
+    "prettier": {
+      "detected": false
+    },
+    "packageManager": {
+      "name": "bun",
+      "lockfile": "bun.lockb"
+    }
+  },
+  "rules": {},
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build"
+  ],
+  "integrations": {
+    "respectEslintIgnore": false,
+    "respectPrettierIgnore": false,
+    "useTypescriptPaths": true
+  }
+}
