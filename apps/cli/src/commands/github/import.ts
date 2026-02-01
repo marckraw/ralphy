@@ -10,6 +10,7 @@ import {
 import type { PRComment, ParsedPRTask, PRDetails } from '../../services/github/types.js';
 import {
   buildPRCommentParserPrompt,
+  buildPRParserClaudeArgs,
   parsePRTasksOutput,
   isPRParsingComplete,
   formatTaskDescription,
@@ -33,6 +34,7 @@ import chalk from 'chalk';
 export interface ImportCommandOptions {
   dryRun?: boolean | undefined;
   verbose?: boolean | undefined;
+  debug?: boolean | undefined;
   includeIssueComments?: boolean | undefined;
 }
 
@@ -40,7 +42,11 @@ export async function importCommand(
   prNumber: string,
   options: ImportCommandOptions = {}
 ): Promise<void> {
-  const { dryRun = false, verbose = false, includeIssueComments = true } = options;
+  const { dryRun = false, verbose = false, debug: debugMode = false, includeIssueComments = true } = options;
+
+  if (debugMode) {
+    logger.debug(`Import options: ${JSON.stringify(options)}`);
+  }
 
   const prNum = parseInt(prNumber, 10);
   if (isNaN(prNum) || prNum <= 0) {
@@ -114,7 +120,8 @@ export async function importCommand(
     actionableComments,
     config.claude.model,
     config.claude.timeout,
-    verbose
+    verbose,
+    debugMode
   );
 
   if (!tasks || tasks.length === 0) {
@@ -188,18 +195,56 @@ async function parseCommentsWithClaude(
   comments: PRComment[],
   model: string,
   timeout: number,
-  verbose: boolean
+  verbose: boolean,
+  debug: boolean
 ): Promise<ParsedPRTask[] | null> {
   const prompt = buildPRCommentParserPrompt(pr, comments);
   const startTime = Date.now();
   let output = '';
 
+  if (debug) {
+    console.log(chalk.yellow('=== Prompt Debug ==='));
+    console.log(`Prompt length: ${prompt.length} chars`);
+    console.log(`Comments count: ${comments.length}`);
+    console.log('');
+    console.log(chalk.dim('First 500 chars:'));
+    console.log(prompt.slice(0, 500));
+    console.log('');
+    console.log(chalk.dim('Last 500 chars:'));
+    console.log(prompt.slice(-500));
+    console.log(chalk.yellow('=== End Prompt Debug ==='));
+    console.log('');
+
+    // Save prompt to temp file for manual testing
+    const fs = await import('fs');
+    const tempFile = '/tmp/ralphy-prompt-debug.txt';
+    fs.writeFileSync(tempFile, prompt);
+    console.log(chalk.cyan(`Prompt saved to: ${tempFile}`));
+    const manualModelArg = model ? ` --model ${model}` : '';
+    console.log(
+      chalk.dim(
+        `Test manually: cat ${tempFile} | claude --print --output-format text${manualModelArg} -p -`
+      )
+    );
+    console.log('');
+  }
+
   const spinner = createSpinner('Analyzing comments with Claude...').start();
 
   try {
-    const args = ['--print', '--model', model, '-p', '-'];
+    const args = buildPRParserClaudeArgs(prompt, model);
+    const argsWithoutPrompt = args.filter((arg, i) => {
+      if (arg === '-p') return false;
+      if (i > 0 && args[i - 1] === '-p') return false;
+      return true;
+    });
+    const cliArgs = [...argsWithoutPrompt, '-p', '-'];
 
-    const subprocess = execa('claude', args, {
+    if (debug) {
+      console.log(chalk.dim(`Claude command: claude ${cliArgs.join(' ')}`));
+    }
+
+    const subprocess = execa('claude', cliArgs, {
       timeout,
       reject: false,
       input: prompt,
@@ -257,6 +302,19 @@ async function parseCommentsWithClaude(
       output = result.stdout;
     }
 
+    if (debug) {
+      console.log(chalk.yellow('=== Claude Response Debug ==='));
+      console.log(`Exit code: ${result.exitCode}`);
+      console.log(`Stdout length: ${result.stdout?.length || 0}`);
+      console.log(`Stderr length: ${result.stderr?.length || 0}`);
+      console.log(`Collected output length: ${output.length}`);
+      if (result.stderr) {
+        console.log(chalk.dim('Stderr:'));
+        console.log(result.stderr);
+      }
+      console.log(chalk.yellow('=== End Claude Response Debug ==='));
+    }
+
     if (result.exitCode !== 0) {
       if (!verbose) spinner.fail(`Claude analysis failed (${elapsed}s)`);
       logger.error(`Claude exited with code ${result.exitCode}`);
@@ -271,13 +329,37 @@ async function parseCommentsWithClaude(
       else logger.success(`Comments analyzed in ${elapsed}s`);
     }
 
-    const tasks = parsePRTasksOutput(output);
-    if (!tasks) {
+    const parseResult = parsePRTasksOutput(output);
+    if (!parseResult.success) {
       logger.error('Failed to parse task output from Claude');
+      if (debug) {
+        logger.error('');
+        logger.error(chalk.yellow('=== Debug Info ==='));
+        logger.error(`Error: ${parseResult.error}`);
+        logger.error(`Start marker found: ${parseResult.details.hasStartMarker}`);
+        logger.error(`End marker found: ${parseResult.details.hasEndMarker}`);
+        if (parseResult.details.jsonParseError) {
+          logger.error(`JSON parse error: ${parseResult.details.jsonParseError}`);
+        }
+        if (parseResult.details.zodError) {
+          logger.error(`Zod validation error:\n${parseResult.details.zodError}`);
+        }
+        if (parseResult.details.jsonContent) {
+          logger.error('');
+          logger.error(chalk.dim('Extracted JSON content:'));
+          logger.error(parseResult.details.jsonContent);
+        }
+        logger.error('');
+        logger.error(chalk.dim('Raw output preview:'));
+        logger.error(parseResult.details.rawOutputPreview);
+        logger.error(chalk.yellow('=== End Debug Info ==='));
+      } else {
+        logger.info(chalk.dim('Run with --debug for detailed error info'));
+      }
       return null;
     }
 
-    return tasks;
+    return parseResult.tasks;
   } catch (err) {
     spinner.fail('Claude analysis error');
     logger.error(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);

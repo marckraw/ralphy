@@ -228,7 +228,7 @@ export function isEnrichmentComplete(output: string): boolean {
 }
 
 export function buildEnrichmentClaudeArgs(prompt: string, model?: string): string[] {
-  const args = ['-p', prompt, '--output-format', 'text'];
+  const args = ['--print', '-p', prompt, '--output-format', 'text'];
   if (model) args.push('--model', model);
   return args;
 }

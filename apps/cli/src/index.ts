@@ -231,13 +231,15 @@ github
   .command('import <pr-number>')
   .description('Import PR review comments as Linear/Jira tasks')
   .option('--dry-run', 'Preview tasks without creating issues')
-  .option('-v, --verbose', 'Show Claude output')
+  .option('--show-output', 'Show Claude output in real-time')
+  .option('--debug', 'Show detailed debug info on parse failures')
   .option('--no-issue-comments', 'Exclude issue comments (only include review comments)')
-  .action(async (prNumber: string, options: { dryRun?: boolean; verbose?: boolean; issueComments?: boolean }) => {
+  .action(async (prNumber: string, options: { dryRun?: boolean; showOutput?: boolean; debug?: boolean; issueComments?: boolean }) => {
     try {
       await importCommand(prNumber, {
         dryRun: options.dryRun,
-        verbose: options.verbose,
+        verbose: options.showOutput,
+        debug: options.debug,
         includeIssueComments: options.issueComments !== false,
       });
     } catch (err) {
