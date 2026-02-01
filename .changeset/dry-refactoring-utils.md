@@ -1,5 +1,5 @@
 ---
-"@mrck-labs/ralphy-cli": minor
+"@mrck-labs/ralphy": minor
 ---
 
 DRY refactoring: Extract reusable utility functions
@@ -11,4 +11,3 @@ DRY refactoring: Extract reusable utility functions
 - Add utils/index.ts to re-export all utilities
 - Update all command files to use shared helpers, eliminating code duplication
 - Consolidate formatDuration from status.ts and run.ts into single implementation
-
