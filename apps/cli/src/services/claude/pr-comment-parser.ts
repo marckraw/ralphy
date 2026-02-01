@@ -143,16 +143,52 @@ export function buildPRCommentParserPrompt(
 
 // ============ Output Parser ============
 
+export interface ParseResult {
+  success: true;
+  tasks: ParsedPRTask[];
+}
+
+export interface ParseError {
+  success: false;
+  error: string;
+  details: {
+    hasStartMarker: boolean;
+    hasEndMarker: boolean;
+    jsonContent?: string;
+    jsonParseError?: string;
+    zodError?: string;
+    rawOutputPreview: string;
+  };
+}
+
+export type ParsePRTasksResult = ParseResult | ParseError;
+
 /**
  * Parses the Claude output to extract tasks.
+ * Returns detailed error information for debugging.
  */
-export function parsePRTasksOutput(output: string): ParsedPRTask[] | null {
+export function parsePRTasksOutput(output: string): ParsePRTasksResult {
+  const rawOutputPreview = output.length > 500
+    ? output.slice(0, 250) + '\n...[truncated]...\n' + output.slice(-250)
+    : output;
+
   // Find JSON between markers
   const startIndex = output.indexOf(PR_TASK_MARKERS.outputStart);
   const endIndex = output.indexOf(PR_TASK_MARKERS.outputEnd);
 
-  if (startIndex === -1 || endIndex === -1) {
-    return null;
+  const hasStartMarker = startIndex !== -1;
+  const hasEndMarker = endIndex !== -1;
+
+  if (!hasStartMarker || !hasEndMarker) {
+    return {
+      success: false,
+      error: 'Missing task markers in output',
+      details: {
+        hasStartMarker,
+        hasEndMarker,
+        rawOutputPreview,
+      },
+    };
   }
 
   const jsonContent = output.slice(startIndex + PR_TASK_MARKERS.outputStart.length, endIndex).trim();
@@ -162,17 +198,40 @@ export function parsePRTasksOutput(output: string): ParsedPRTask[] | null {
     const validated = PRTasksOutputSchema.safeParse(parsed);
 
     if (!validated.success) {
-      return null;
+      return {
+        success: false,
+        error: 'Zod schema validation failed',
+        details: {
+          hasStartMarker,
+          hasEndMarker,
+          jsonContent: jsonContent.length > 500 ? jsonContent.slice(0, 500) + '...' : jsonContent,
+          zodError: JSON.stringify(validated.error.format(), null, 2),
+          rawOutputPreview,
+        },
+      };
     }
 
-    return validated.data.tasks.map((task) => ({
-      title: task.title,
-      description: task.description,
-      priority: task.priority as NormalizedPriority,
-      sourceComments: [], // Will be populated by the caller if needed
-    }));
-  } catch {
-    return null;
+    return {
+      success: true,
+      tasks: validated.data.tasks.map((task) => ({
+        title: task.title,
+        description: task.description,
+        priority: task.priority as NormalizedPriority,
+        sourceComments: [], // Will be populated by the caller if needed
+      })),
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: 'JSON parse error',
+      details: {
+        hasStartMarker,
+        hasEndMarker,
+        jsonContent: jsonContent.length > 500 ? jsonContent.slice(0, 500) + '...' : jsonContent,
+        jsonParseError: err instanceof Error ? err.message : 'Unknown error',
+        rawOutputPreview,
+      },
+    };
   }
 }
 
@@ -222,7 +281,7 @@ export function formatTaskDescription(
  * Builds Claude CLI arguments for PR comment parsing.
  */
 export function buildPRParserClaudeArgs(prompt: string, model?: string): string[] {
-  const args = ['-p', prompt, '--output-format', 'text'];
+  const args = ['--print', '-p', prompt, '--output-format', 'text'];
   if (model) args.push('--model', model);
   return args;
 }
