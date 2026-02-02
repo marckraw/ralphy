@@ -3,7 +3,6 @@ import { initializeClient, validateApiKey } from '../services/linear/client.js';
 import { fetchTeams, fetchProjects } from '../services/linear/projects.js';
 import { isInitialized, saveStoredConfig, loadAndResolveConfig, updateStoredConfig } from '../services/config/manager.js';
 import { createRalphyStructure } from '../services/config/paths.js';
-import { writeSecretsToEnv, type EnvSecrets } from '../services/config/env-writer.js';
 import {
   validateGitHubToken,
   validateRepoAccess,
@@ -20,6 +19,44 @@ import {
 } from '@mrck-labs/ralphy-shared';
 import { createSpinner } from '../utils/spinner.js';
 import { Version3Client } from 'jira.js';
+
+/**
+ * Secrets collected during init that user needs to add to .env
+ */
+interface CollectedSecrets {
+  LINEAR_API_KEY?: string;
+  JIRA_API_TOKEN?: string;
+  GITHUB_TOKEN?: string;
+}
+
+/**
+ * Prints the secrets that the user needs to add to their .env file.
+ * Does NOT modify any files - user must copy/paste manually.
+ */
+function printEnvInstructions(secrets: CollectedSecrets): void {
+  const entries = Object.entries(secrets).filter(([, value]) => value);
+
+  if (entries.length === 0) {
+    return;
+  }
+
+  logger.info('\n' + '═'.repeat(50));
+  logger.info(logger.bold('⚠️  ACTION REQUIRED: Add these to your .env file'));
+  logger.info('═'.repeat(50));
+  logger.info('');
+  logger.info('Copy the following lines to your .env file:');
+  logger.info('');
+  logger.info(logger.dim('─'.repeat(40)));
+
+  for (const [key, value] of entries) {
+    logger.info(`${key}=${value}`);
+  }
+
+  logger.info(logger.dim('─'.repeat(40)));
+  logger.info('');
+  logger.warn('Ralphy does NOT modify your .env file automatically.');
+  logger.info('═'.repeat(50) + '\n');
+}
 
 type Provider = 'linear' | 'jira';
 
@@ -80,7 +117,10 @@ export async function initCommand(options: InitOptions = {}): Promise<void> {
     ]);
 
     if (addGitHub) {
-      await configureGitHubIntegration();
+      const secrets = await configureGitHubIntegration();
+      if (secrets) {
+        printEnvInstructions(secrets);
+      }
     }
     return;
   }
@@ -144,9 +184,13 @@ async function promptForReconfiguration(_config: RalphyConfigV2): Promise<void> 
   ]);
 
   switch (action) {
-    case 'github':
-      await configureGitHubIntegration();
+    case 'github': {
+      const secrets = await configureGitHubIntegration();
+      if (secrets) {
+        printEnvInstructions(secrets);
+      }
       break;
+    }
     case 'force':
       await fullInitialization();
       break;
@@ -162,12 +206,16 @@ async function fullInitialization(): Promise<void> {
   // Select provider
   const provider = await selectProvider();
 
+  let collectedSecrets: CollectedSecrets = {};
+
   if (provider === 'linear') {
     const result = await initLinear();
     if (!result) return;
+    collectedSecrets = { ...collectedSecrets, ...result.secrets };
   } else {
     const result = await initJira();
     if (!result) return;
+    collectedSecrets = { ...collectedSecrets, ...result.secrets };
   }
 
   // Offer to configure GitHub
@@ -181,8 +229,14 @@ async function fullInitialization(): Promise<void> {
   ]);
 
   if (addGitHub) {
-    await configureGitHubIntegration();
+    const githubSecrets = await configureGitHubIntegration();
+    if (githubSecrets) {
+      collectedSecrets = { ...collectedSecrets, ...githubSecrets };
+    }
   }
+
+  // Print all collected secrets at the end for user to add manually
+  printEnvInstructions(collectedSecrets);
 
   printNextSteps();
 }
@@ -203,7 +257,7 @@ async function selectProvider(): Promise<Provider> {
   return provider;
 }
 
-async function initLinear(): Promise<RalphyConfigStored | null> {
+async function initLinear(): Promise<{ config: RalphyConfigStored; secrets: CollectedSecrets } | null> {
   // Get Linear API key
   const apiKeyInfo = await getLinearApiKey();
   if (!apiKeyInfo) {
@@ -241,18 +295,7 @@ async function initLinear(): Promise<RalphyConfigStored | null> {
   const structureSpinner = createSpinner('Creating Ralphy configuration...').start();
   await createRalphyStructure();
 
-  // Write API key to .env file (unless it came from env already)
-  if (!isFromEnv) {
-    const secrets: EnvSecrets = { LINEAR_API_KEY: apiKey };
-    const envResult = await writeSecretsToEnv(secrets);
-    if (!envResult.success) {
-      structureSpinner.fail('Failed to write secrets to .env');
-      logger.error(envResult.error);
-      return null;
-    }
-  }
-
-  // Save config WITHOUT the API key (it's in .env)
+  // Save config WITHOUT the API key (user will add it to .env manually)
   const config = createLinearConfigStored(project.id, project.name, team.id);
   const result = await saveStoredConfig(config);
   if (!result.success) {
@@ -266,16 +309,19 @@ async function initLinear(): Promise<RalphyConfigStored | null> {
   logger.info(`Provider: ${logger.highlight('Linear')}`);
   logger.info(`Project: ${logger.highlight(project.name)}`);
   logger.info(`Team: ${logger.highlight(team.name)}`);
+
+  // Collect secrets for user to add manually (if not already from env)
+  const secrets: CollectedSecrets = {};
   if (!isFromEnv) {
-    logger.info(`API key: ${logger.dim('Stored in .env file')}`);
+    secrets.LINEAR_API_KEY = apiKey;
   } else {
     logger.info(`API key: ${logger.dim(`Using ${ENV_VARS.LINEAR_API_KEY} from environment`)}`);
   }
 
-  return config;
+  return { config, secrets };
 }
 
-async function initJira(): Promise<RalphyConfigStored | null> {
+async function initJira(): Promise<{ config: RalphyConfigStored; secrets: CollectedSecrets } | null> {
   // Get Jira credentials
   const credentials = await getJiraCredentials();
   if (!credentials) {
@@ -316,18 +362,7 @@ async function initJira(): Promise<RalphyConfigStored | null> {
   const structureSpinner = createSpinner('Creating Ralphy configuration...').start();
   await createRalphyStructure();
 
-  // Write API token to .env file (unless it came from env already)
-  if (!isFromEnv) {
-    const secrets: EnvSecrets = { JIRA_API_TOKEN: apiToken };
-    const envResult = await writeSecretsToEnv(secrets);
-    if (!envResult.success) {
-      structureSpinner.fail('Failed to write secrets to .env');
-      logger.error(envResult.error);
-      return null;
-    }
-  }
-
-  // Save config WITHOUT the API token (it's in .env)
+  // Save config WITHOUT the API token (user will add it to .env manually)
   const config = createJiraConfigStored(
     host,
     email,
@@ -346,13 +381,16 @@ async function initJira(): Promise<RalphyConfigStored | null> {
   logger.success('\nRalphy initialized successfully!');
   logger.info(`Provider: ${logger.highlight('Jira Cloud')}`);
   logger.info(`Project: ${logger.highlight(project.name)} (${project.key})`);
+
+  // Collect secrets for user to add manually (if not already from env)
+  const secrets: CollectedSecrets = {};
   if (!isFromEnv) {
-    logger.info(`API token: ${logger.dim('Stored in .env file')}`);
+    secrets.JIRA_API_TOKEN = apiToken;
   } else {
     logger.info(`API token: ${logger.dim(`Using ${ENV_VARS.JIRA_API_TOKEN} from environment`)}`);
   }
 
-  return config;
+  return { config, secrets };
 }
 
 function printNextSteps(): void {
@@ -365,14 +403,14 @@ function printNextSteps(): void {
 
 // ============ GitHub Configuration ============
 
-async function configureGitHubIntegration(): Promise<void> {
+async function configureGitHubIntegration(): Promise<CollectedSecrets | null> {
   logger.info('\nConfiguring GitHub Integration...');
 
   // Get token
   const tokenInfo = await getGitHubToken();
   if (!tokenInfo) {
     logger.error('GitHub token is required for PR integration.');
-    return;
+    return null;
   }
 
   const { token, isFromEnv } = tokenInfo;
@@ -382,14 +420,14 @@ async function configureGitHubIntegration(): Promise<void> {
   const tokenResult = await validateGitHubToken(token);
   if (!tokenResult.success) {
     validatingSpinner.fail(tokenResult.error);
-    return;
+    return null;
   }
   validatingSpinner.succeed(`GitHub token validated (${tokenResult.data})`);
 
   // Get repository info
   const repoInfo = await getRepositoryInfo();
   if (!repoInfo) {
-    return;
+    return null;
   }
 
   // Validate repo access
@@ -397,29 +435,17 @@ async function configureGitHubIntegration(): Promise<void> {
   const repoResult = await validateRepoAccess(token, repoInfo.owner, repoInfo.repo);
   if (!repoResult.success) {
     repoSpinner.fail(repoResult.error);
-    return;
+    return null;
   }
   repoSpinner.succeed(`Repository access validated`);
 
   // Update config
   const updateSpinner = createSpinner('Updating configuration...').start();
 
-  // Write token to .env file (unless it came from env already)
-  if (!isFromEnv) {
-    const secrets: EnvSecrets = { GITHUB_TOKEN: token };
-    const envResult = await writeSecretsToEnv(secrets);
-    if (!envResult.success) {
-      updateSpinner.fail('Failed to write secrets to .env');
-      logger.error(envResult.error);
-      return;
-    }
-  }
-
-  // Update config WITHOUT the token (it's in .env or env var)
+  // Update config WITHOUT the token (user will add it to .env manually)
   const updateResult = await updateStoredConfig({
     integrations: {
       github: {
-        // Don't store the token in config - it's in .env
         owner: repoInfo.owner,
         repo: repoInfo.repo,
       },
@@ -429,20 +455,26 @@ async function configureGitHubIntegration(): Promise<void> {
   if (!updateResult.success) {
     updateSpinner.fail('Failed to update configuration');
     logger.error(updateResult.error);
-    return;
+    return null;
   }
   updateSpinner.succeed('GitHub integration configured');
 
   logger.success('\nGitHub integration added!');
   logger.info(`Repository: ${logger.highlight(`${repoInfo.owner}/${repoInfo.repo}`)}`);
-  if (isFromEnv) {
-    logger.info(`Token: ${logger.dim(`Using ${ENV_VARS.GITHUB_TOKEN} from environment`)}`);
+
+  // Collect secrets for user to add manually (if not already from env)
+  const secrets: CollectedSecrets = {};
+  if (!isFromEnv) {
+    secrets.GITHUB_TOKEN = token;
   } else {
-    logger.info(`Token: ${logger.dim('Stored in .env file')}`);
+    logger.info(`Token: ${logger.dim(`Using ${ENV_VARS.GITHUB_TOKEN} from environment`)}`);
   }
+
   logger.info(`\nYou can now use:`);
   logger.info(`  ${logger.formatCommand('ralphy github prs')} - List PRs with review comments`);
   logger.info(`  ${logger.formatCommand('ralphy github import <pr>')} - Import PR comments as tasks`);
+
+  return secrets;
 }
 
 interface TokenInfo {
