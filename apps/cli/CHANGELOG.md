@@ -1,5 +1,11 @@
 # @mrck-labs/ralphy
 
+## 1.10.0
+
+### Minor Changes
+
+- 7eb9fa5: we do not modify .env file anymore
+
 ## 1.9.0
 
 ### Minor Changes
